@@ -66,3 +66,4 @@ def caption_frame(frame: dict, llm) -> dict:
         "timestamp": frame["timestamp"],
         **result.model_dump(),
     }
+
