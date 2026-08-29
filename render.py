@@ -23,7 +23,7 @@ def add_info_row(table, label: str, value: str):
     value_cell.text = value
 
 
-def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> str:
+def render_docx(pdd: PDD, output_path: str = "cache/output/PDD_final.docx") -> str:
     doc = Document()
 
     # Title

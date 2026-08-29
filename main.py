@@ -1,12 +1,17 @@
 from dotenv import load_dotenv
 from create_video import create_frames, caption_frame
 from langchain_openai import ChatOpenAI
-from schemas import FrameCaption,format_timestamp
+from schemas import FrameCaption, format_timestamp
+from transcribe import transcribe_audio
+from structure import structure_pdd
+from render import render_docx
 
 load_dotenv()
 
-#Isso aqui vai ser um grafo
-frames = create_frames("test1.mp4")
+video_path = "cache/test1.mp4"
+
+# Getting the frames from the video
+frames = create_frames(video_path)
 llm = ChatOpenAI(model="gpt-4o-mini").with_structured_output(FrameCaption)
 captions = [caption_frame(frame, llm) for frame in frames]
 
@@ -19,9 +24,14 @@ for c in captions:
 for c in captions:
     c["time"] = format_timestamp(c["timestamp"])
 
-from structure import structure_pdd
+# Getting the audio from the video
+transcript = transcribe_audio(video_path)
+print(f"\nTranscript segments: {len(transcript)}")
+for t in transcript:
+    print(f"  [{t['start']:.1f}s] {t['text']}")
 
-pdd = structure_pdd(captions)
+# Creating PDD Structure
+pdd = structure_pdd(captions, transcript)
 
 print(f"Process: {pdd.process_name}")
 print(f"Objective: {pdd.objective}")
@@ -31,15 +41,10 @@ print("\nSteps:")
 for step in pdd.as_is:
     print(f"  {step.number}. [{step.time}] {step.action} ({step.system})")
     print(f"     Result: {step.result}")
+    print(f"     Frame: {step.frame_ref}")
 print(f"\nBusiness rules: {pdd.business_rules}")
 print(f"Exceptions: {pdd.exceptions}")
 
-for step in pdd.as_is:
-    print(f"  {step.number}. [{step.time}] {step.action} ({step.system})")
-    print(f"     Result: {step.result}")
-    print(f"     Frame: {step.frame_ref}")
-
-from render import render_docx
-
+# Creating final document
 output_path = render_docx(pdd)
 print(f"\nDocument generated: {output_path}")

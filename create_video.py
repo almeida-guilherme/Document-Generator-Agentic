@@ -20,7 +20,7 @@ def create_frames(videoPath):
         scene_list= scene_list,
         video= video,
         num_images=1,
-        output_dir="frames/"
+        output_dir="cache/frames/"
     )
 
     frames = []
