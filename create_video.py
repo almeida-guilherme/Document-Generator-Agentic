@@ -27,7 +27,7 @@ def create_frames(videoPath):
     for i, (start,ed) in enumerate(scene_list):
         filename = image_filenames[i][0]
         frames.append({
-            "path": f"frames/{filename}",
+            "path": f"cache/frames/{filename}",
             "timestamp":start.get_seconds(),
         })
 

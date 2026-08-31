@@ -1,9 +1,17 @@
 from pydantic import BaseModel, Field
 
+
 class FrameCaption(BaseModel):
     screen_or_system: str = Field(description="Which screen, application, or website is visible in the frame")
     observed_action: str = Field(description="What the user appears to be doing, or what is being displayed at this moment")
     visible_text: list[str] = Field(default_factory=list, description="Relevant text visible on screen (titles, fields, buttons, messages)")
+
+
+class ExceptionItem(BaseModel):
+    name: str = Field(description="Short name identifying the exception")
+    action: str = Field(description="What action or condition triggers this exception")
+    parameters: str = Field(default="", description="Relevant parameters or context for this exception, if any")
+    action_to_be_taken: str = Field(description="What should be done when this exception occurs")
 
 
 class Step(BaseModel):
@@ -17,13 +25,11 @@ class Step(BaseModel):
 
 class PDD(BaseModel):
     process_name: str = Field(description="Short, descriptive name of the documented process")
-    objective: str = Field(description="Objective of the process, in 1-2 sentences")
-    scope_start: str = Field(description="Where the process begins (observed initial state)")
-    scope_end: str = Field(description="Where the process ends (observed final state)")
-    tools: list[str] = Field(description="List of systems/tools used throughout the process")
+    project_proposal: str = Field(description="Summary of the project and its current (as-is) state, for the Introduction section")
     as_is: list[Step] = Field(description="Sequence of process steps, in chronological order")
-    business_rules: list[str] = Field(default_factory=list, description="Identified business rules, if any")
-    exceptions: list[str] = Field(default_factory=list, description="Observed exceptions or deviations, if any")
+    business_exceptions: list[ExceptionItem] = Field(default_factory=list, description="Business-related exceptions identified, if any")
+    system_exceptions: list[ExceptionItem] = Field(default_factory=list, description="System/application-related exceptions identified, if any")
+
 
 def format_timestamp(seconds: float) -> str:
     m = int(seconds // 60)

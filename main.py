@@ -8,7 +8,7 @@ from render import render_docx
 
 load_dotenv()
 
-video_path = "cache/test1.mp4"
+video_path = "cache/test2.mp4"
 
 # Getting the frames from the video
 frames = create_frames(video_path)
@@ -34,16 +34,14 @@ for t in transcript:
 pdd = structure_pdd(captions, transcript)
 
 print(f"Process: {pdd.process_name}")
-print(f"Objective: {pdd.objective}")
-print(f"Scope: {pdd.scope_start} → {pdd.scope_end}")
-print(f"Tools: {pdd.tools}")
+print(f"Project Proposal: {pdd.project_proposal}")
 print("\nSteps:")
 for step in pdd.as_is:
     print(f"  {step.number}. [{step.time}] {step.action} ({step.system})")
     print(f"     Result: {step.result}")
     print(f"     Frame: {step.frame_ref}")
-print(f"\nBusiness rules: {pdd.business_rules}")
-print(f"Exceptions: {pdd.exceptions}")
+print(f"\nBusiness Exceptions: {pdd.business_exceptions}")
+print(f"System Exceptions: {pdd.system_exceptions}")
 
 # Creating final document
 output_path = render_docx(pdd)
