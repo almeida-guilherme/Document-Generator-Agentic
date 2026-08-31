@@ -27,4 +27,7 @@ Other rules:
 - If there are no observable business or system exceptions, return empty lists — do not force content.
 - Use the "frame_ref" field to reference the file path of the observation that evidences each step.
 - For each step, also provide a "short_label": a concise 4-5 word summary suitable for a flowchart box (not a full sentence).
+
+- Each step must have a single "instruction" field: a clear automation directive describing what needs to be done — e.g. "You need to enter the OLX website", "You need to search for 'Nintendo Switch' in the search bar", "You need to open each listing and extract the price". Do not split this into separate system/action/result fields, and do not describe passively what was observed (avoid phrasing like "User accesses..." or "Page is displayed..."). Mention the system/application only if relevant to the instruction itself (e.g. "You need to open Google Chrome and search for OLX").
+
 """

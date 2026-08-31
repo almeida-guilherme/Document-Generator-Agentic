@@ -150,19 +150,9 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> str:
     h = doc.add_heading("2.2 Process Steps", level=2)
     add_bookmark(h, "steps_sec", 5)
     for step in pdd.as_is:
-        doc.add_heading(f"Step {step.number} — {step.time}", level=3)
+        doc.add_heading(f"Step {step.number}", level=3)
 
-        p = doc.add_paragraph()
-        p.add_run("System: ").bold = True
-        p.add_run(step.system)
-
-        p = doc.add_paragraph()
-        p.add_run("Action: ").bold = True
-        p.add_run(step.action)
-
-        p = doc.add_paragraph()
-        p.add_run("Result: ").bold = True
-        p.add_run(step.result)
+        doc.add_paragraph(step.instruction)
 
         try:
             doc.add_picture(step.frame_ref, width=Inches(5.5))

@@ -33,16 +33,6 @@ for t in transcript:
 # Creating PDD Structure
 pdd = structure_pdd(captions, transcript)
 
-print(f"Process: {pdd.process_name}")
-print(f"Project Proposal: {pdd.project_proposal}")
-print("\nSteps:")
-for step in pdd.as_is:
-    print(f"  {step.number}. [{step.time}] {step.action} ({step.system})")
-    print(f"     Result: {step.result}")
-    print(f"     Frame: {step.frame_ref}")
-print(f"\nBusiness Exceptions: {pdd.business_exceptions}")
-print(f"System Exceptions: {pdd.system_exceptions}")
-
 # Creating final document
 output_path = render_docx(pdd)
 print(f"\nDocument generated: {output_path}")
