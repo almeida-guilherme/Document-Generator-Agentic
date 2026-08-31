@@ -1,10 +1,11 @@
+import os
 from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from schemas import PDD, ExceptionItem
-import os
+from flowchart import build_flowchart
 
 
 def set_cell_shading(cell, color_hex: str):
@@ -23,29 +24,48 @@ def remove_heading_border(paragraph):
     pPr.append(pBdr)
 
 
-def add_table_of_contents(doc):
-    """Inserts a real Word TOC field. Word will calculate/display it when opened
-    (may show 'Right-click > Update Field' the first time, depending on the Word version)."""
-    paragraph = doc.add_paragraph()
-    run = paragraph.add_run()
+def add_bookmark(paragraph, bookmark_name: str, bookmark_id: int):
+    start = OxmlElement("w:bookmarkStart")
+    start.set(qn("w:id"), str(bookmark_id))
+    start.set(qn("w:name"), bookmark_name)
+    paragraph._p.insert(0, start)
 
-    fldChar_begin = OxmlElement("w:fldChar")
-    fldChar_begin.set(qn("w:fldCharType"), "begin")
+    end = OxmlElement("w:bookmarkEnd")
+    end.set(qn("w:id"), str(bookmark_id))
+    paragraph._p.append(end)
 
-    instrText = OxmlElement("w:instrText")
-    instrText.set(qn("xml:space"), "preserve")
-    instrText.text = 'TOC \\o "1-3" \\h \\z \\u'
 
-    fldChar_separate = OxmlElement("w:fldChar")
-    fldChar_separate.set(qn("w:fldCharType"), "separate")
+def add_internal_hyperlink(paragraph, bookmark_name: str, text: str):
+    hyperlink = OxmlElement("w:hyperlink")
+    hyperlink.set(qn("w:anchor"), bookmark_name)
 
-    fldChar_end = OxmlElement("w:fldChar")
-    fldChar_end.set(qn("w:fldCharType"), "end")
+    run = OxmlElement("w:r")
+    rPr = OxmlElement("w:rPr")
 
-    run._r.append(fldChar_begin)
-    run._r.append(instrText)
-    run._r.append(fldChar_separate)
-    run._r.append(fldChar_end)
+    color = OxmlElement("w:color")
+    color.set(qn("w:val"), "0563C1")
+    rPr.append(color)
+
+    underline = OxmlElement("w:u")
+    underline.set(qn("w:val"), "single")
+    rPr.append(underline)
+
+    run.append(rPr)
+
+    text_elem = OxmlElement("w:t")
+    text_elem.text = text
+    run.append(text_elem)
+
+    hyperlink.append(run)
+    paragraph._p.append(hyperlink)
+
+
+def add_manual_toc(doc, entries: list[tuple[str, str, int]]):
+    """entries: list of (bookmark_name, display_text, indent_level)"""
+    for bookmark_name, text, indent in entries:
+        p = doc.add_paragraph()
+        p.paragraph_format.left_indent = Inches(0.25 * indent)
+        add_internal_hyperlink(p, bookmark_name, text)
 
 
 def add_exception_table(doc, title: str, items: list[ExceptionItem]):
@@ -86,25 +106,49 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> str:
 
     doc.add_page_break()
 
-    # --- Page 2: Table of Contents ---
+    # --- Page 2: Table of Contents (manual, hyperlinked) ---
     toc_heading = doc.add_heading("Table of Contents", level=1)
     remove_heading_border(toc_heading)
     toc_heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    add_table_of_contents(doc)
+
+    toc_entries = [
+        ("intro", "1. Introduction", 0),
+        ("proposal", "1.1 Project Proposal", 1),
+        ("asis", "2. As Is", 0),
+        ("flowchart_sec", "2.1 Flowchart", 1),
+        ("steps_sec", "2.2 Process Steps", 1),
+        ("exceptions", "3. Exceptions", 0),
+    ]
+    add_manual_toc(doc, toc_entries)
 
     doc.add_page_break()
 
     # --- Page 3+: Content ---
-    doc.add_heading("1. Introduction", level=1)
-    doc.add_heading("1.1 Project Proposal", level=2)
+
+    # 1. Introduction
+    h = doc.add_heading("1. Introduction", level=1)
+    add_bookmark(h, "intro", 1)
+
+    h = doc.add_heading("1.1 Project Proposal", level=2)
+    add_bookmark(h, "proposal", 2)
     doc.add_paragraph(pdd.project_proposal)
 
-    doc.add_heading("2. As Is", level=1)
+    # 2. As Is
+    h = doc.add_heading("2. As Is", level=1)
+    add_bookmark(h, "asis", 3)
 
-    doc.add_heading("2.1 Flowchart", level=2)
-    doc.add_paragraph("[Flowchart to be added]")
+    h = doc.add_heading("2.1 Flowchart", level=2)
+    add_bookmark(h, "flowchart_sec", 4)
+    try:
+        flowchart_path = build_flowchart(pdd)
+        doc.add_picture(flowchart_path, width=Inches(3.5))
+        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    except Exception as e:
+        print(f"Failed to generate/insert flowchart: {e}")
+        doc.add_paragraph("[Flowchart could not be generated]")
 
-    doc.add_heading("2.2 Process Steps", level=2)
+    h = doc.add_heading("2.2 Process Steps", level=2)
+    add_bookmark(h, "steps_sec", 5)
     for step in pdd.as_is:
         doc.add_heading(f"Step {step.number} — {step.time}", level=3)
 
@@ -132,7 +176,9 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> str:
 
         doc.add_paragraph()
 
-    doc.add_heading("3. Exceptions", level=1)
+    # 3. Exceptions
+    h = doc.add_heading("3. Exceptions", level=1)
+    add_bookmark(h, "exceptions", 6)
     add_exception_table(doc, "Business Exceptions", pdd.business_exceptions)
     add_exception_table(doc, "System Exceptions", pdd.system_exceptions)
 

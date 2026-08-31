@@ -15,4 +15,6 @@ Critical instructions for combining sources:
 - Base your output only on what is present in the provided observations and transcript. Do not invent systems, actions, exceptions, or results that lack evidence.
 - If there are no observable business or system exceptions, return empty lists — do not force content.
 - Use the "frame_ref" field to reference the file path of the observation that evidences each step.
+
+- For each step, also provide a "short_label": a concise 4-5 word summary suitable for a flowchart box (not a full sentence).
 """

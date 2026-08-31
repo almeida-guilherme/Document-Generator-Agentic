@@ -15,13 +15,13 @@ class ExceptionItem(BaseModel):
 
 
 class Step(BaseModel):
-    number: int = Field(description="Sequential step number, starting at 1")
-    time: str = Field(description="Approximate timestamp of the step, in mm:ss format")
-    action: str = Field(description="Clear, objective description of the action performed in this step")
-    system: str = Field(description="System, application, or screen where the action occurs")
-    result: str = Field(description="What happens as a consequence of this action")
-    frame_ref: str = Field(description="File path of the image evidencing this step")
-
+    number: int
+    time: str
+    action: str
+    system: str
+    result: str
+    frame_ref: str
+    short_label: str = Field(description="A very short label (max 4-5 words) summarizing this step's action, suitable for a flowchart node — e.g. 'Search YouTube', 'Open video', 'Configure OBS'")
 
 class PDD(BaseModel):
     process_name: str = Field(description="Short, descriptive name of the documented process")
