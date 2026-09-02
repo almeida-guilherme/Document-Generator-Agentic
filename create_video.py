@@ -8,26 +8,26 @@ import io
 import base64
 from prompts.caption_prompt import CAPTION_PROMPT
 
-def create_frames(videoPath):
-    video = open_video(videoPath)
+def create_frames(video_path: str, output_dir: str = "cache/frames"):
+    video = open_video(video_path)
     scene_manager = SceneManager()
     scene_manager.add_detector(AdaptiveDetector())
     scene_manager.detect_scenes(video=video)
     scene_list = scene_manager.get_scene_list()
-    video = open_video(videoPath)
+    video = open_video(video_path)
 
     image_filenames = save_images(
         scene_list= scene_list,
         video= video,
         num_images=1,
-        output_dir="cache/frames/"
+        output_dir=output_dir
     )
 
     frames = []
     for i, (start,ed) in enumerate(scene_list):
         filename = image_filenames[i][0]
         frames.append({
-            "path": f"cache/frames/{filename}",
+            "path": f"{output_dir}/{filename}",
             "timestamp":start.get_seconds(),
         })
 
