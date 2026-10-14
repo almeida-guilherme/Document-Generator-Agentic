@@ -92,8 +92,11 @@ def add_exception_table(doc, title: str, items: list[ExceptionItem]):
         row.cells[3].text = item.action_to_be_taken
 
 
-def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> str:
+def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[str, dict]:
+    """Writes the .docx; returns its path and what was actually inserted (for the run report)."""
     doc = Document()
+    stats = {"images_inserted": 0, "images_missing": [], "flowchart": False}
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     # --- Page 1: Cover ---
     title = doc.add_heading("Process Design Document (PDD)", level=0)
@@ -140,9 +143,10 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> str:
     h = doc.add_heading("2.1 Flowchart", level=2)
     add_bookmark(h, "flowchart_sec", 4)
     try:
-        flowchart_path = build_flowchart(pdd)
+        flowchart_path = build_flowchart(pdd, output_path=os.path.join(os.path.dirname(output_path), "flowchart"))
         doc.add_picture(flowchart_path, width=Inches(3.5))
         doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        stats["flowchart"] = True
     except Exception as e:
         print(f"Failed to generate/insert flowchart: {e}")
         doc.add_paragraph("[Flowchart could not be generated]")
@@ -150,19 +154,23 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> str:
     h = doc.add_heading("2.2 Process Steps", level=2)
     add_bookmark(h, "steps_sec", 5)
     for step in pdd.as_is:
-        doc.add_heading(f"Step {step.number}", level=3)
+        doc.add_heading(f"Step {step.number} ({step.time})", level=3)
 
         doc.add_paragraph(step.instruction)
 
-        try:
-            doc.add_picture(step.frame_ref, width=Inches(5.5))
+        # The first frame is the step's main screenshot; the others only back it up in the run report.
+        image = step.frame_paths[0] if step.frame_paths else None
+        if image and os.path.exists(image):
+            doc.add_picture(image, width=Inches(5.5))
             doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
             caption = doc.add_paragraph(f"Screenshot — Step {step.number}")
             caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
             caption.runs[0].italic = True
             caption.runs[0].font.size = Pt(9)
-        except FileNotFoundError:
-            doc.add_paragraph(f"[Image not found: {step.frame_ref}]")
+            stats["images_inserted"] += 1
+        else:
+            doc.add_paragraph("[No screenshot for this step]")
+            stats["images_missing"].append(step.number)
 
         doc.add_paragraph()
 
@@ -172,7 +180,6 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> str:
     add_exception_table(doc, "Business Exceptions", pdd.business_exceptions)
     add_exception_table(doc, "System Exceptions", pdd.system_exceptions)
 
-    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     doc.save(output_path)
 
-    return output_path
+    return output_path, stats
