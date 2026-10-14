@@ -1,10 +1,11 @@
 import os
+from PIL import Image
 from docx import Document
 from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from schemas import PDD, ExceptionItem
+from schemas import PDD, ExceptionItem, RequirementItem
 from flowchart import build_flowchart
 
 
@@ -28,7 +29,12 @@ def add_bookmark(paragraph, bookmark_name: str, bookmark_id: int):
     start = OxmlElement("w:bookmarkStart")
     start.set(qn("w:id"), str(bookmark_id))
     start.set(qn("w:name"), bookmark_name)
-    paragraph._p.insert(0, start)
+    # w:pPr must stay the paragraph's first child, otherwise Word refuses to open the file.
+    p_pr = paragraph._p.pPr
+    if p_pr is not None:
+        p_pr.addnext(start)
+    else:
+        paragraph._p.insert(0, start)
 
     end = OxmlElement("w:bookmarkEnd")
     end.set(qn("w:id"), str(bookmark_id))
@@ -92,6 +98,39 @@ def add_exception_table(doc, title: str, items: list[ExceptionItem]):
         row.cells[3].text = item.action_to_be_taken
 
 
+REQUIREMENT_LABELS = {
+    "frequency": "Frequency",
+    "volume": "Volume",
+    "business_rule": "Business rule",
+    "reference_data": "Reference data",
+    "access": "Access",
+    "other": "Other",
+}
+
+
+def add_requirements_table(doc, items: list[RequirementItem]):
+    if not items:
+        doc.add_paragraph("No business rules or requirements identified in this process.")
+        return
+
+    table = doc.add_table(rows=1, cols=2)
+    table.style = "Table Grid"
+    for i, h in enumerate(["Type", "Description"]):
+        cell = table.rows[0].cells[i]
+        cell.text = h
+        cell.paragraphs[0].runs[0].bold = True
+        set_cell_shading(cell, "2F5496")
+
+    order = list(REQUIREMENT_LABELS)
+    for item in sorted(items, key=lambda r: order.index(r.category)):
+        row = table.add_row()
+        row.cells[0].text = REQUIREMENT_LABELS[item.category]
+        row.cells[1].text = item.description
+    for row in table.rows:
+        row.cells[0].width = Inches(1.4)
+        row.cells[1].width = Inches(5.1)
+
+
 def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[str, dict]:
     """Writes the .docx; returns its path and what was actually inserted (for the run report)."""
     doc = Document()
@@ -121,6 +160,7 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[s
         ("flowchart_sec", "2.1 Flowchart", 1),
         ("steps_sec", "2.2 Process Steps", 1),
         ("exceptions", "3. Exceptions", 0),
+        ("requirements", "4. Business Rules & Requirements", 0),
     ]
     add_manual_toc(doc, toc_entries)
 
@@ -144,7 +184,13 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[s
     add_bookmark(h, "flowchart_sec", 4)
     try:
         flowchart_path = build_flowchart(pdd, output_path=os.path.join(os.path.dirname(output_path), "flowchart"))
-        doc.add_picture(flowchart_path, width=Inches(3.5))
+        # Fit inside 3.5" x 7.5" so a long chart shrinks instead of being cut off at the page bottom.
+        with Image.open(flowchart_path) as img:
+            width, height = img.size
+        if height / width > 7.5 / 3.5:
+            doc.add_picture(flowchart_path, height=Inches(7.5))
+        else:
+            doc.add_picture(flowchart_path, width=Inches(3.5))
         doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
         stats["flowchart"] = True
     except Exception as e:
@@ -154,15 +200,17 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[s
     h = doc.add_heading("2.2 Process Steps", level=2)
     add_bookmark(h, "steps_sec", 5)
     for step in pdd.as_is:
-        doc.add_heading(f"Step {step.number} ({step.time})", level=3)
+        # keep_with_next keeps each step's heading, text, screenshot and caption on the same page.
+        title = f"Step {step.number} ({step.time})" if step.time else f"Step {step.number}"
+        doc.add_heading(title, level=3).paragraph_format.keep_with_next = True
 
-        doc.add_paragraph(step.instruction)
+        doc.add_paragraph(step.instruction).paragraph_format.keep_with_next = True
 
-        # The first frame is the step's main screenshot; the others only back it up in the run report.
-        image = step.frame_paths[0] if step.frame_paths else None
+        image = step.main_frame_path
         if image and os.path.exists(image):
             doc.add_picture(image, width=Inches(5.5))
             doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+            doc.paragraphs[-1].paragraph_format.keep_with_next = True
             caption = doc.add_paragraph(f"Screenshot — Step {step.number}")
             caption.alignment = WD_ALIGN_PARAGRAPH.CENTER
             caption.runs[0].italic = True
@@ -179,6 +227,11 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[s
     add_bookmark(h, "exceptions", 6)
     add_exception_table(doc, "Business Exceptions", pdd.business_exceptions)
     add_exception_table(doc, "System Exceptions", pdd.system_exceptions)
+
+    # 4. Business rules & requirements
+    h = doc.add_heading("4. Business Rules & Requirements", level=1)
+    add_bookmark(h, "requirements", 7)
+    add_requirements_table(doc, pdd.requirements)
 
     doc.save(output_path)
 

@@ -4,7 +4,7 @@ from schemas import PDD
 
 def build_flowchart(pdd: PDD, output_path: str = "cache/flowchart", max_nodes: int = 12) -> str:
     dot = graphviz.Digraph(format="png")
-    dot.attr(rankdir="TB")
+    dot.attr(rankdir="TB", ranksep="0.25", dpi="150")
     dot.attr("node", shape="box", style="rounded,filled", fillcolor="#D9E2F3", fontname="Helvetica", fontsize="10")
 
     dot.node("start", "Start", shape="ellipse", fillcolor="#2F5496", fontcolor="white")

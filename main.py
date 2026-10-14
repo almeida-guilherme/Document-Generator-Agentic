@@ -11,6 +11,12 @@ parser.add_argument("--window", type=int, default=30, help="observations per str
 parser.add_argument("--sample-every", type=float, default=0.5, help="seconds between sampled frames (default: 0.5)")
 parser.add_argument("--change-threshold", type=float, default=0.001,
                     help="fraction of changed pixels that counts as a new screen state (default: 0.001)")
+parser.add_argument("--caption-width", type=int, default=1366,
+                    help="width frames are shrunk to before captioning; smaller is cheaper but small text "
+                         "(file names, column headers) gets misread (default: 1366, the useful maximum)")
+parser.add_argument("--from-run", metavar="RUN_DIR",
+                    help="reuse frames, captions and transcript from an earlier run of the same video "
+                         "(only structuring and the document are redone)")
 args = parser.parse_args()
 
 run_dir = new_run_dir(args.video, args.runs_dir)
@@ -19,6 +25,8 @@ output, report = run_pdd_pipeline(
     run_dir,
     max_frames_per_window=args.window,
     frame_options={"sample_every": args.sample_every, "change_threshold": args.change_threshold},
+    caption_width=args.caption_width,
+    from_run=args.from_run,
 )
 print_report(report)
 print(f"Document generated: {output}")

@@ -22,6 +22,17 @@ def changed_fraction(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.count_nonzero(cv2.absdiff(a, b) > PIXEL_DELTA)) / a.size
 
 
+def _samples(cap, step: int, fps: float):
+    """Yields (image, timestamp) every `step` frames, decoding only the frames it returns."""
+    index = 0
+    while cap.grab():
+        if index % step == 0:
+            ok, image = cap.retrieve()
+            if ok:
+                yield image, index / fps
+        index += 1
+
+
 def create_frames(
     video_path: str,
     output_dir: str = "cache/frames",
@@ -42,9 +53,9 @@ def create_frames(
                    (e.g. a form fully filled right before clicking Save).
       - "moving":  the screen keeps changing for more than max_unsettled seconds (scrolling, animations),
                    so one frame is taken anyway instead of waiting for it to settle.
+      - "start" / "end": first and last state of the video.
 
     Defaults: a moving mouse cursor changes ~0.07% of pixels, a filled form field ~0.13%.
-      - "start" / "end": first and last state of the video.
 
     Returns frames in chronological order: [{"id", "path", "timestamp", "reason"}].
     """
@@ -68,19 +79,8 @@ def create_frames(
     settled = None            # last sample that was stable (not mid-transition): (image, gray, timestamp)
     settled_kept = True       # whether `settled` is already in `frames`
     unsettled_since = None    # when the screen started changing without settling
-    index = 0
 
-    while True:
-        if not cap.grab():
-            break
-        if index % step:
-            index += 1
-            continue
-        ok, image = cap.retrieve()
-        timestamp = index / fps
-        index += 1
-        if not ok:
-            continue
+    for image, timestamp in _samples(cap, step, fps):
         gray = _small_gray(image)
 
         if kept_gray is None:
@@ -121,7 +121,7 @@ def create_frames(
     return frames
 
 
-def encode_image(path: str, max_width: int = 800) -> str:
+def encode_image(path: str, max_width: int = 1366) -> str:
     img = Image.open(path)
     if img.width > max_width:
         ratio = max_width / img.width
@@ -131,8 +131,8 @@ def encode_image(path: str, max_width: int = 800) -> str:
     return base64.b64encode(buffer.getvalue()).decode("utf-8")
 
 
-def caption_frame(frame: dict, llm) -> dict:
-    image_b64 = encode_image(frame["path"])
+def caption_frame(frame: dict, llm, max_width: int = 1366) -> dict:
+    image_b64 = encode_image(frame["path"], max_width)
 
     message = HumanMessage(content=[
         {"type": "text", "text": CAPTION_PROMPT},

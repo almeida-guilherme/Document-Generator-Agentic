@@ -1,3 +1,4 @@
+from typing import Literal
 from pydantic import BaseModel, Field
 
 
@@ -16,22 +17,39 @@ class ExceptionItem(BaseModel):
 
 # --- What the LLM returns ---
 
-class ProcessOverview(BaseModel):
-    process_name: str = Field(description="Short, descriptive name of the documented process")
-    project_proposal: str = Field(description="Summary of the project and its current (as-is) state, for the Introduction section")
-    goal: str = Field(description="One sentence stating the outcome the process achieves; used to decide which screens belong to the process")
+class RequirementItem(BaseModel):
+    category: Literal["frequency", "volume", "business_rule", "reference_data", "access", "other"] = Field(
+        description="frequency: how often the process runs; volume: how many items per run; business_rule: logic or "
+                    "lookups applied to the data; reference_data: tables or templates the process depends on; "
+                    "access: systems, sites or permissions needed; other: anything else an automation developer must know")
+    description: str = Field(description="The requirement as stated or shown, in one or two sentences")
 
 
-class DraftStep(BaseModel):
+class OutlineStep(BaseModel):
     instruction: str = Field(description="Automation instruction describing what needs to be done in this step, written as a directive (e.g. 'You need to enter the OLX website', 'You need to search for \"Nintendo Switch\" in the search bar')")
     short_label: str = Field(description="A very short label (max 4-5 words) summarizing this step's action, suitable for a flowchart node")
-    frame_ids: list[str] = Field(description="IDs of the observations (e.g. 'F012') that evidence this step, in chronological order; the first one is used as the step's main screenshot")
+    frame_ids: list[str] = Field(description="IDs of the observations (e.g. 'F012') that evidence this step, in chronological order")
+    narrated_at: float | None = Field(default=None, description="Timestamp in seconds of the narration segment that describes this step, or null if it isn't narrated")
 
 
-class WindowResult(BaseModel):
-    steps: list[DraftStep] = Field(default_factory=list, description="Process steps found in this part of the recording, in chronological order")
-    business_exceptions: list[ExceptionItem] = Field(default_factory=list, description="Business-related exceptions identified in this part, if any")
-    system_exceptions: list[ExceptionItem] = Field(default_factory=list, description="System/application-related exceptions identified in this part, if any")
+class ProcessOutline(BaseModel):
+    process_name: str = Field(description="Short, descriptive name of the documented process")
+    project_proposal: str = Field(description="Summary of the project and its current (as-is) state, for the Introduction section")
+    steps: list[OutlineStep] = Field(description="Every step of the process, once each, in the order they are performed")
+    requirements: list[RequirementItem] = Field(default_factory=list, description="Business rules and requirements stated or shown, if any")
+    business_exceptions: list[ExceptionItem] = Field(default_factory=list, description="Business-related exceptions identified, if any")
+    system_exceptions: list[ExceptionItem] = Field(default_factory=list, description="System/application-related exceptions identified, if any")
+
+
+class RefinedStep(BaseModel):
+    number: int = Field(description="Number of the outline step being refined, exactly as given")
+    instruction: str = Field(description="The step's instruction, made more specific with names, fields, buttons or values visible in its observations; same directive style")
+    frame_ids: list[str] = Field(description="IDs of the observations that evidence this step, in chronological order")
+    main_frame_id: str = Field(description="The one id from frame_ids used as the step's screenshot: the frame that best shows the step done (e.g. the completed form, not the empty one)")
+
+
+class WindowRefinement(BaseModel):
+    steps: list[RefinedStep] = Field(default_factory=list, description="One entry per outline step given, in the same order")
 
 
 # --- The assembled document (numbers, times and image paths are filled in by code, not by the LLM) ---
@@ -42,13 +60,14 @@ class Step(BaseModel):
     instruction: str
     short_label: str
     frame_ids: list[str]
-    frame_paths: list[str] = Field(default_factory=list)
+    main_frame_path: str | None = None
 
 
 class PDD(BaseModel):
     process_name: str
     project_proposal: str
     as_is: list[Step]
+    requirements: list[RequirementItem] = Field(default_factory=list)
     business_exceptions: list[ExceptionItem] = Field(default_factory=list)
     system_exceptions: list[ExceptionItem] = Field(default_factory=list)
 
