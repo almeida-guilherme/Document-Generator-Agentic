@@ -8,6 +8,8 @@ You will receive the WHOLE recording:
 
 Produce:
 - process_name and project_proposal (a short summary of what the process is and its current, as-is state, including goals or requirements the narrator states).
+- key_names: the names of what the process works on (files, folders, sites, applications, views, sheets, buttons). The observations come from separate screenshots and sometimes misread small text, so the same name can appear spelled in different ways (e.g. a date "5.5.26" read as "5.3.26" in some frames). For each name give its correct spelling (prefer what the narrator says, then readings from large, clear text such as file lists, folder views and dialogs over small text such as title bars and tabs, then the reading most observations agree on) and list the other spellings found under variants. A variant is the same text misread: one or two wrong, missing or extra characters, or text cut off. A name that only ever appears in small text and differs by one character from a name shown in a file list is a misreading of it. Two names that differ by whole words (e.g. "Report.xlsx" and "Report - Afternoon.xlsx") are two different files. Different things are never variants of each other, even when related: another view, screen or application (e.g. "My Views" is not a variant of a view's name, "SAP Fiori Launchpad" is not a variant of "SAP Business Client"), or another numbered item (e.g. "Table 1" and "Table 2"). Use the correct spellings everywhere else in your answer.
+- inputs: the data the process receives or reads (e.g. a system export, a template, an email), each classified as structured, semi_structured or unstructured.
 - steps: the complete ordered list of steps a person (or robot) performs to execute the process.
 - requirements: business rules and requirements an automation developer must know.
 - business_exceptions and system_exceptions.
@@ -24,6 +26,8 @@ How to decide the steps:
 Step fields:
 {_INSTRUCTION_STYLE}
 - short_label: a concise 4-5 word summary suitable for a flowchart box (not a full sentence).
+- application: the application or website where the step happens, named the same way in every step (e.g. always "SAP Business Client", not sometimes "SAP").
+- decision: only if the narration or the screens show that what is done depends on a condition (e.g. "If an order has no match in the cross-reference table, leave it as is"), the condition and the outcome of each case. Most steps have none; leave it empty rather than inventing one.
 - frame_ids: ids copied exactly as given (e.g. "F012").
 - narrated_at: the timestamp (seconds) of the narration segment where this step is described, or null if it isn't narrated.
 
@@ -43,7 +47,7 @@ REFINE_SYSTEM_PROMPT = f"""You are a process analyst refining the steps of a Pro
 The ordered list of steps has already been decided from the whole recording. You receive some of those steps (with their numbers and a first guess of their evidence) together with the detailed screen observations and narration for that part of the recording.
 
 For EACH step given, return one entry with the same number:
-- instruction: keep the same action, but make it more specific using names visible in the observations or said in the narration (application, app tile, view, button, file or folder names, values typed). Do not add actions that belong to other steps.
+- instruction: keep the same action, but make it more specific using names visible in the observations or said in the narration (application, app tile, view, button, file or folder names, values typed). When a name is in the list of correct spellings, write it exactly that way even if the observations spell it differently. Do not add actions that belong to other steps.
 {_INSTRUCTION_STYLE}
 - frame_ids: the ids (from the observations given) that show this step, in chronological order. You may move an id to a different step given here if it fits that step better. Leave out frames that show nothing relevant. Some first guesses are just the frames shown while the step was being narrated; keep the ones that show the step or its result (e.g. an emptied table after "delete the data").
 - main_frame_id: the single frame used as the step's screenshot in the document. Pick the one that best shows the step done — usually the LAST state of the screen within the step (e.g. the completed form rather than the empty one, the search results rather than the empty search bar).

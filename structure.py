@@ -1,8 +1,11 @@
 import json
 import os
+import re
+from difflib import SequenceMatcher
 from typing import cast
 from langchain_core.messages import HumanMessage, SystemMessage
-from schemas import PDD, Step, ProcessOutline, OutlineStep, WindowRefinement, ExceptionItem, format_timestamp
+from schemas import (ProcessModel, Step, ProcessOutline, OutlineStep, WindowRefinement, ExceptionItem, KeyName,
+                     format_timestamp)
 from prompts.structure_prompt import OUTLINE_SYSTEM_PROMPT, REFINE_SYSTEM_PROMPT
 
 # Narration starting this many seconds before a window is still sent with it, since people often
@@ -11,6 +14,10 @@ NARRATION_LEAD = 30.0
 # How long after a step is narrated its frames are searched for, when the outline attached none.
 NARRATION_WINDOW = 30.0
 MAX_STEPS_PER_WINDOW = 10
+# How many characters a misreading may differ from the correct name by, at most, and as a share of its length
+# (so short names like "SAP" and "SAP BC" aren't taken for each other).
+MAX_MISREAD_CHARS = 3
+MAX_MISREAD_SHARE = 0.15
 
 
 def _observations_text(captions: list[dict], compact: bool = False) -> str:
@@ -111,6 +118,89 @@ def enforce_chronology(steps: list[Step], frame_by_id: dict[str, dict]) -> dict[
     return dropped
 
 
+def measure_durations(steps: list[Step], frame_by_id: dict[str, dict]) -> None:
+    """
+    Sets each step's start (its first frame) and duration (until the next step with frames starts; the
+    last one ends at its last frame). Steps without frames get neither, and the time spent on them falls
+    in the previous step's duration. Expects frames already in chronological order (enforce_chronology).
+    """
+    timed = [s for s in steps if s.frame_ids]
+    for step, following in zip(timed, timed[1:] + [None]):
+        step.start_seconds = frame_by_id[step.frame_ids[0]]["timestamp"]
+        end = (frame_by_id[following.frame_ids[0]]["timestamp"] if following
+               else frame_by_id[step.frame_ids[-1]]["timestamp"])
+        step.duration_seconds = round(end - step.start_seconds, 2)
+
+
+def _key_names_text(key_names: list[KeyName]) -> str:
+    if not key_names:
+        return ""
+    return "Correct spelling of names (use exactly these):\n" + "\n".join(f"- {k.name}" for k in key_names) + "\n\n"
+
+
+def is_misreading(variant: str, name: str) -> bool:
+    """True if `variant` differs from `name` by a few characters (see MAX_MISREAD_CHARS)."""
+    changed = sum(max(i2 - i1, j2 - j1)
+                  for op, i1, i2, j1, j2 in SequenceMatcher(None, variant, name, autojunk=False).get_opcodes()
+                  if op != "equal")
+    return 0 < changed <= min(MAX_MISREAD_CHARS, MAX_MISREAD_SHARE * len(name))
+
+
+def apply_key_names(model: ProcessModel) -> dict[str, str]:
+    """
+    Captions misread small text differently from frame to frame (e.g. a file dated "5.5.26" read as
+    "5.3.26" in some frames), so the same file ends up with two names in the document. The outline lists
+    each name's correct spelling and the misreadings it saw; this replaces the misreadings everywhere.
+    Returns the replacements made.
+    """
+    # Misreadings differ from the name by a character or two (e.g. "5.3.26" for "5.5.26", or text cut off
+    # at the end). The model sometimes also lists different things as variants, such as another view
+    # ("My Views"), or another file whose name has a word more ("Report.xlsx" and "Report - Afternoon.xlsx"),
+    # so variants that differ by more are ignored. A variant contained in the correct name (e.g.
+    # "Blocks Report" for "AP Blocks Report") would also match inside correct text, so it's left alone too.
+    replacements = {v.strip(): k.name.strip() for k in model.key_names for v in k.variants
+                    if len(v.strip()) >= 3 and v.strip() not in k.name and is_misreading(v.strip(), k.name.strip())}
+    return replace_names(model, replacements)
+
+
+def replace_names(model: ProcessModel, replacements: dict[str, str]) -> dict[str, str]:
+    """Replaces each key of `replacements` by its value in all the model's text; returns those it found."""
+    if not replacements:
+        return {}
+    # Longest first, so a variant that contains a shorter one is replaced whole.
+    pattern = re.compile("|".join(re.escape(v) for v in sorted(replacements, key=len, reverse=True)))
+    used: dict[str, str] = {}
+
+    # When the model hedged between two readings ("'5.5.26.xlsx' or '5.3.26.xlsx'"), replacing one leaves
+    # the same name twice; those are collapsed to one.
+    targets = list(dict.fromkeys(replacements.values()))
+    repeated = re.compile("|".join(
+        rf"(?P<q{i}>['\"]?){re.escape(name)}(?P=q{i})(?: or |, |/| and )(?P=q{i}){re.escape(name)}(?P=q{i})"
+        for i, name in enumerate(targets)))
+
+    def fix(text: str) -> str:
+        def sub(m):
+            used[m.group(0)] = replacements[m.group(0)]
+            return replacements[m.group(0)]
+
+        def once(m):
+            i, quote = next((int(k[1:]), v) for k, v in m.groupdict().items() if v is not None)
+            return quote + targets[i] + quote
+        return repeated.sub(once, pattern.sub(sub, text))
+
+    model.process_name = fix(model.process_name)
+    model.project_proposal = fix(model.project_proposal)
+    for step in model.as_is:
+        step.instruction, step.short_label, step.decision = fix(step.instruction), fix(step.short_label), fix(step.decision)
+    for item in model.requirements:
+        item.description = fix(item.description)
+    for item in model.inputs:
+        item.name, item.source = fix(item.name), fix(item.source)
+    for item in model.business_exceptions + model.system_exceptions:
+        item.action, item.parameters, item.action_to_be_taken = fix(item.action), fix(item.parameters), fix(item.action_to_be_taken)
+    return used
+
+
 def make_windows(steps: list[OutlineStep], position: dict[str, int], max_frames: int) -> list[list[int]]:
     """
     Groups consecutive steps (by index) so each group's frames span at most `max_frames` observations,
@@ -137,7 +227,7 @@ def structure_pdd(
     frames: list[dict],
     llm,
     max_frames_per_window: int = 30,
-) -> tuple[PDD, dict]:
+) -> tuple[ProcessModel, dict]:
     """
     Builds the PDD in two passes so long recordings stay consistent:
       1. outline: one call sees the whole recording (compact observations + full narration) and decides
@@ -145,10 +235,11 @@ def structure_pdd(
          there are no duplicates or gaps at window boundaries.
       2. refine: one call per group of steps gets the detailed observations for those steps' frames and
          makes each instruction specific and picks its screenshot. It can't add, drop or reorder steps.
-    Code then numbers the steps, takes their time from their first frame and maps ids to image paths.
+    Code then numbers the steps, takes their time from their first frame and maps ids to image paths,
+    measures how long each step took in the recording, and fixes misread names using the outline's glossary.
 
     `llm` is a LangChain chat model (structured output is applied here).
-    Returns the PDD and a report with the coverage checks.
+    Returns the process model and a report with the coverage checks.
     """
     transcript = transcript or []
     frame_by_id = {f["id"]: f for f in frames}
@@ -187,7 +278,8 @@ def structure_pdd(
             result = cast(WindowRefinement, refine_llm.invoke([
                 SystemMessage(content=REFINE_SYSTEM_PROMPT),
                 HumanMessage(content=(
-                    f"Process: {outline.process_name}\n\nSteps to refine:\n{numbered}\n\n"
+                    f"Process: {outline.process_name}\n\n{_key_names_text(outline.key_names)}"
+                    f"Steps to refine:\n{numbered}\n\n"
                     f"Screen observations for this part:\n\n{_observations_text(window_caps)}\n\n"
                     f"Audio narration for this part:\n\n{_transcript_text(narration)}"
                 )),
@@ -213,20 +305,27 @@ def structure_pdd(
                 time=format_timestamp(frame_by_id[ids[0]]["timestamp"]) if ids else "",
                 instruction=instruction,
                 short_label=base.short_label,
+                application=base.application,
+                decision=base.decision,
                 frame_ids=ids,
                 main_frame_path=frame_by_id[main]["path"] if main else None,
             ))
 
     out_of_order = enforce_chronology(steps, frame_by_id)
+    measure_durations(steps, frame_by_id)
 
-    pdd = PDD(
+    pdd = ProcessModel(
         process_name=outline.process_name,
         project_proposal=outline.project_proposal,
         as_is=steps,
+        inputs=outline.inputs,
+        key_names=outline.key_names,
         requirements=outline.requirements,
         business_exceptions=_dedupe_exceptions(outline.business_exceptions),
         system_exceptions=_dedupe_exceptions(outline.system_exceptions),
     )
+
+    names_fixed = apply_key_names(pdd)
 
     referenced = {i for s in steps for i in s.frame_ids}
     report = {
@@ -238,6 +337,10 @@ def structure_pdd(
         "steps_not_refined": fallbacks,
         "steps_framed_by_narration": framed_by_narration,
         "frames_dropped_out_of_order": out_of_order,
+        "names_fixed": names_fixed,
+        "applications": pdd.applications,
+        "decision_points": [s.number for s in pdd.decision_points],
+        "recorded_seconds": pdd.recorded_seconds,
         "invalid_frame_refs": invalid_refs,
         "frames_referenced": len(referenced),
         "frames_not_used": [c["id"] for c in captions if c["id"] not in referenced],

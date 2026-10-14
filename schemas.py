@@ -25,9 +25,25 @@ class RequirementItem(BaseModel):
     description: str = Field(description="The requirement as stated or shown, in one or two sentences")
 
 
+class ProcessInput(BaseModel):
+    name: str = Field(description="What the process receives or reads, e.g. 'SAP blocked orders export', 'Customer request email'")
+    kind: Literal["structured", "semi_structured", "unstructured"] = Field(
+        description="structured: fixed fields or tables (spreadsheet, database, system screen); semi_structured: documents "
+                    "with a known layout but variable content (invoices, forms as PDF); unstructured: free text or images "
+                    "(emails, chat messages, scanned letters)")
+    source: str = Field(default="", description="Where it comes from (application, folder, mailbox), if shown or stated")
+
+
+class KeyName(BaseModel):
+    name: str = Field(description="The correct spelling of a file, folder, site, application, view, sheet or button name")
+    variants: list[str] = Field(default_factory=list, description="Other spellings of the same thing found in the observations (misreadings), if any")
+
+
 class OutlineStep(BaseModel):
     instruction: str = Field(description="Automation instruction describing what needs to be done in this step, written as a directive (e.g. 'You need to enter the OLX website', 'You need to search for \"Nintendo Switch\" in the search bar')")
     short_label: str = Field(description="A very short label (max 4-5 words) summarizing this step's action, suitable for a flowchart node")
+    application: str = Field(default="", description="The application or website where this step happens (e.g. 'Excel', 'SAP Business Client', 'SharePoint'), spelled the same way in every step; empty if unclear")
+    decision: str = Field(default="", description="If what is done in this step depends on a condition (e.g. 'If the order has no match in the table, leave it as is'), the condition and what happens in each case; otherwise empty")
     frame_ids: list[str] = Field(description="IDs of the observations (e.g. 'F012') that evidence this step, in chronological order")
     narrated_at: float | None = Field(default=None, description="Timestamp in seconds of the narration segment that describes this step, or null if it isn't narrated")
 
@@ -35,6 +51,8 @@ class OutlineStep(BaseModel):
 class ProcessOutline(BaseModel):
     process_name: str = Field(description="Short, descriptive name of the documented process")
     project_proposal: str = Field(description="Summary of the project and its current (as-is) state, for the Introduction section")
+    key_names: list[KeyName] = Field(default_factory=list, description="The names that identify what the process works on (files, folders, sites, applications, views, sheets), each with its correct spelling")
+    inputs: list[ProcessInput] = Field(default_factory=list, description="The data the process receives or reads")
     steps: list[OutlineStep] = Field(description="Every step of the process, once each, in the order they are performed")
     requirements: list[RequirementItem] = Field(default_factory=list, description="Business rules and requirements stated or shown, if any")
     business_exceptions: list[ExceptionItem] = Field(default_factory=list, description="Business-related exceptions identified, if any")
@@ -52,7 +70,9 @@ class WindowRefinement(BaseModel):
     steps: list[RefinedStep] = Field(default_factory=list, description="One entry per outline step given, in the same order")
 
 
-# --- The assembled document (numbers, times and image paths are filled in by code, not by the LLM) ---
+# --- The process model (numbers, times and image paths are filled in by code, not by the LLM) ---
+# Every input (a recording now, an existing PDD later) produces a ProcessModel, and every output
+# (the .docx, the ROI analysis) reads one.
 
 class Step(BaseModel):
     number: int
@@ -61,15 +81,41 @@ class Step(BaseModel):
     short_label: str
     frame_ids: list[str]
     main_frame_path: str | None = None
+    application: str = ""
+    decision: str = ""
+    start_seconds: float | None = None
+    # Time from this step's first frame to the next step's first frame, as recorded: it includes the
+    # narrator's pauses and explanations, so it is an upper bound of the time the action takes.
+    duration_seconds: float | None = None
 
 
-class PDD(BaseModel):
+class ProcessModel(BaseModel):
     process_name: str
     project_proposal: str
     as_is: list[Step]
+    source: Literal["recording", "document"] = "recording"
+    inputs: list[ProcessInput] = Field(default_factory=list)
+    key_names: list[KeyName] = Field(default_factory=list)
     requirements: list[RequirementItem] = Field(default_factory=list)
     business_exceptions: list[ExceptionItem] = Field(default_factory=list)
     system_exceptions: list[ExceptionItem] = Field(default_factory=list)
+
+    @property
+    def applications(self) -> list[str]:
+        """Applications in order of first use."""
+        return list(dict.fromkeys(s.application for s in self.as_is if s.application))
+
+    @property
+    def decision_points(self) -> list[Step]:
+        return [s for s in self.as_is if s.decision]
+
+    @property
+    def recorded_seconds(self) -> float | None:
+        """From the first step's start to the end of the last timed step, as recorded."""
+        timed = [s for s in self.as_is if s.start_seconds is not None]
+        if not timed:
+            return None
+        return timed[-1].start_seconds + (timed[-1].duration_seconds or 0) - timed[0].start_seconds
 
 
 def format_timestamp(seconds: float) -> str:
