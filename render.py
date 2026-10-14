@@ -5,8 +5,8 @@ from docx.shared import Inches, Pt
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-from schemas import PDD, ExceptionItem, RequirementItem
-from flowchart import build_flowchart
+from schemas import ProcessModel, ExceptionItem, RequirementItem, format_timestamp
+from flowchart import build_flowchart, columns_for
 
 
 def set_cell_shading(cell, color_hex: str):
@@ -83,12 +83,7 @@ def add_exception_table(doc, title: str, items: list[ExceptionItem]):
 
     table = doc.add_table(rows=1, cols=4)
     table.style = "Table Grid"
-    headers = ["Exception Name", "Action", "Parameters", "Action to be Taken"]
-    for i, h in enumerate(headers):
-        cell = table.rows[0].cells[i]
-        cell.text = h
-        cell.paragraphs[0].runs[0].bold = True
-        set_cell_shading(cell, "2F5496")
+    add_header_row(table, ["Exception Name", "Action", "Parameters", "Action to be Taken"])
 
     for item in items:
         row = table.add_row()
@@ -115,23 +110,60 @@ def add_requirements_table(doc, items: list[RequirementItem]):
 
     table = doc.add_table(rows=1, cols=2)
     table.style = "Table Grid"
-    for i, h in enumerate(["Type", "Description"]):
-        cell = table.rows[0].cells[i]
-        cell.text = h
-        cell.paragraphs[0].runs[0].bold = True
-        set_cell_shading(cell, "2F5496")
+    add_header_row(table, ["Type", "Description"])
 
     order = list(REQUIREMENT_LABELS)
     for item in sorted(items, key=lambda r: order.index(r.category)):
         row = table.add_row()
         row.cells[0].text = REQUIREMENT_LABELS[item.category]
         row.cells[1].text = item.description
+    set_column_widths(table, [1.4, 5.1])
+
+
+INPUT_KIND_LABELS = {"structured": "structured", "semi_structured": "semi-structured", "unstructured": "unstructured"}
+
+
+def set_column_widths(table, widths: list[float]):
+    """Word reads the cell widths, LibreOffice the column widths; autofit would override both."""
+    table.autofit = False
+    for column, width in zip(table.columns, widths):
+        column.width = Inches(width)
     for row in table.rows:
-        row.cells[0].width = Inches(1.4)
-        row.cells[1].width = Inches(5.1)
+        for cell, width in zip(row.cells, widths):
+            cell.width = Inches(width)
 
 
-def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[str, dict]:
+def add_header_row(table, headers: list[str]):
+    for i, h in enumerate(headers):
+        cell = table.rows[0].cells[i]
+        cell.text = h
+        cell.paragraphs[0].runs[0].bold = True
+        set_cell_shading(cell, "2F5496")
+
+
+def add_overview_table(doc, model: ProcessModel):
+    """The facts an automation assessment starts from, measured from the recording where possible."""
+    recorded = model.recorded_seconds
+    rows = [
+        ("Applications", ", ".join(model.applications) or "Not identified"),
+        ("Inputs", "\n".join(f"{i.name} ({INPUT_KIND_LABELS[i.kind]}{', from ' + i.source if i.source else ''})"
+                             for i in model.inputs) or "Not identified"),
+        ("Steps", str(len(model.as_is))),
+        ("Decision points", ", ".join(f"step {s.number}" for s in model.decision_points) or "None identified"),
+    ]
+    if recorded is not None:
+        rows.append(("Recorded duration", f"{format_timestamp(recorded)} (includes the narrator's explanations, "
+                                          "so the task itself is usually faster)"))
+    table = doc.add_table(rows=1, cols=2)
+    table.style = "Table Grid"
+    add_header_row(table, ["Item", "Value"])
+    for label, value in rows:
+        row = table.add_row()
+        row.cells[0].text, row.cells[1].text = label, value
+    set_column_widths(table, [1.6, 4.9])
+
+
+def render_docx(pdd: ProcessModel, output_path: str = "output/PDD_final.docx") -> tuple[str, dict]:
     """Writes the .docx; returns its path and what was actually inserted (for the run report)."""
     doc = Document()
     stats = {"images_inserted": 0, "images_missing": [], "flowchart": False}
@@ -156,6 +188,7 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[s
     toc_entries = [
         ("intro", "1. Introduction", 0),
         ("proposal", "1.1 Project Proposal", 1),
+        ("overview", "1.2 Process Overview", 1),
         ("asis", "2. As Is", 0),
         ("flowchart_sec", "2.1 Flowchart", 1),
         ("steps_sec", "2.2 Process Steps", 1),
@@ -176,6 +209,10 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[s
     add_bookmark(h, "proposal", 2)
     doc.add_paragraph(pdd.project_proposal)
 
+    h = doc.add_heading("1.2 Process Overview", level=2)
+    add_bookmark(h, "overview", 8)
+    add_overview_table(doc, pdd)
+
     # 2. As Is
     h = doc.add_heading("2. As Is", level=1)
     add_bookmark(h, "asis", 3)
@@ -184,13 +221,16 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[s
     add_bookmark(h, "flowchart_sec", 4)
     try:
         flowchart_path = build_flowchart(pdd, output_path=os.path.join(os.path.dirname(output_path), "flowchart"))
-        # Fit inside 3.5" x 7.5" so a long chart shrinks instead of being cut off at the page bottom.
+        # Fit inside the box so a long chart shrinks instead of being cut off at the page bottom; a chart
+        # laid out in several columns gets the full page width.
+        max_w = 3.5 if columns_for(len(pdd.as_is)) == 1 else 6.5
+        max_h = 7.5
         with Image.open(flowchart_path) as img:
             width, height = img.size
-        if height / width > 7.5 / 3.5:
-            doc.add_picture(flowchart_path, height=Inches(7.5))
+        if height / width > max_h / max_w:
+            doc.add_picture(flowchart_path, height=Inches(max_h))
         else:
-            doc.add_picture(flowchart_path, width=Inches(3.5))
+            doc.add_picture(flowchart_path, width=Inches(max_w))
         doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
         stats["flowchart"] = True
     except Exception as e:
@@ -201,10 +241,16 @@ def render_docx(pdd: PDD, output_path: str = "output/PDD_final.docx") -> tuple[s
     add_bookmark(h, "steps_sec", 5)
     for step in pdd.as_is:
         # keep_with_next keeps each step's heading, text, screenshot and caption on the same page.
-        title = f"Step {step.number} ({step.time})" if step.time else f"Step {step.number}"
+        title = f"Step {step.number}" + (f" — {step.application}" if step.application else "")
+        title += f" ({step.time})" if step.time else ""
         doc.add_heading(title, level=3).paragraph_format.keep_with_next = True
 
         doc.add_paragraph(step.instruction).paragraph_format.keep_with_next = True
+        if step.decision:
+            p = doc.add_paragraph()
+            p.add_run("Decision: ").bold = True
+            p.add_run(step.decision)
+            p.paragraph_format.keep_with_next = True
 
         image = step.main_frame_path
         if image and os.path.exists(image):

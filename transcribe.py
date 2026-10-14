@@ -17,6 +17,16 @@ def has_audio(video_path: str) -> bool:
     return bool(result.stdout.strip())
 
 
+def media_seconds(path: str) -> float:
+    result = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+        capture_output=True, text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"ffprobe failed on {path}: {result.stderr.strip()}")
+    return float(result.stdout.strip() or 0)
+
+
 def extract_audio_chunks(video_path: str, audio_dir: str, chunk_seconds: int = CHUNK_SECONDS) -> list[str]:
     """Extracts the audio as consecutive MP3 chunks of `chunk_seconds` each; returns their paths in order."""
     os.makedirs(audio_dir, exist_ok=True)
