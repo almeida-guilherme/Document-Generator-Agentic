@@ -1,0 +1,14 @@
+# Secrets and confidential material never go into the image.
+.env
+videos/
+runs/
+data/
+cache/
+output/
+# Rebuilt inside the image.
+.venv/
+web/frontend/node_modules/
+web/frontend/dist/
+**/__pycache__/
+.pytest_cache/
+.git/

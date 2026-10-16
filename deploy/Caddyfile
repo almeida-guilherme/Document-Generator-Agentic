@@ -1,0 +1,7 @@
+# Caddy gets and renews the HTTPS certificate for the domain by itself (Let's Encrypt).
+{$PDD_DOMAIN} {
+	encode zstd gzip
+	# Uploads of long recordings are streamed to the app, which enforces PDD_MAX_UPLOAD_MB.
+	reverse_proxy app:8000
+	header Strict-Transport-Security "max-age=31536000"
+}

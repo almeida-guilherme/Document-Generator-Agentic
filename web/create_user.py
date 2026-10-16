@@ -1,6 +1,7 @@
 """Creates an account from the command line, e.g. when sign-up is closed (PDD_ALLOW_SIGNUP=false):
 
     .venv/bin/python -m web.create_user someone@company.com
+    docker compose exec app python -m web.create_user someone@company.com   (on the server)
 """
 import getpass
 import sys
@@ -26,6 +27,7 @@ def main() -> None:
         user = db.exec(select(User).where(User.email == email)).first()
         if user:
             user.password_hash = hasher.hash(password)
+            user.session_version = (user.session_version or 0) + 1  # logs out the account's sessions
             print(f"Password changed for {email}.")
         else:
             user = User(email=email, password_hash=hasher.hash(password))

@@ -126,6 +126,8 @@ Open http://127.0.0.1:8000 and create an account. For development with live relo
 
 The API is described at http://127.0.0.1:8000/api/docs.
 
+To put it on a server, `compose.yaml` runs the app (`Dockerfile`) behind Caddy, which handles HTTPS; `deploy/LIGHTSAIL.md` is the step-by-step for AWS Lightsail, with `deploy/env.example` as the settings to fill in.
+
 ## Checking a run
 
 The run report printed at the end (and saved in `report.json`) shows where frames could get lost:
