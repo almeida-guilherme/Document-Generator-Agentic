@@ -29,7 +29,7 @@ from docx.text.paragraph import Paragraph
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from schemas import ProcessModel, repair_model
+from schemas import ProcessModel, format_timestamp, repair_model
 
 MAX_CELL_CHARS = 150
 MAX_PLACEHOLDER_CHARS = 80
@@ -109,6 +109,14 @@ class StepFormat(BaseModel):
                                                                 "(e.g. 'Login SAP'), or null if steps aren't grouped")
     label: str = Field(description="How steps are numbered, with {n} for the number, e.g. 'P{n}', 'Passo {n}', '{n}.'")
     separator: str = Field(description="What separates the label from the step text, e.g. ' - ', ': ', ' '")
+    details_index: int | None = Field(default=None, description="Index of a paragraph right under the example step "
+                                                                "giving that step's application and/or time in the "
+                                                                "recording (e.g. 'Aplicação: SAP   Tempo: 00:12'), "
+                                                                "or null if there is none")
+    details_application: str | None = Field(default=None, description="In that paragraph, the example application "
+                                                                      "exactly as written (e.g. '<SAP>'), or null")
+    details_time: str | None = Field(default=None, description="In that paragraph, the example time exactly as "
+                                                               "written (e.g. '<00:12>'), or null")
 
 
 class Labels(BaseModel):
@@ -142,13 +150,13 @@ Give one entry per block:
 - table_rows: a table with a header and example or empty rows, to be replaced by rows for the new process (systems, inputs, files, exceptions, revision history, impacted teams...). Give its purpose and header_rows.
 - table_answers: a table of questions or items in one column whose other column is answered for each process (e.g. metrics questions). Give answer_column.
 - steps: not used in blocks. Detailed steps are described by step_format instead; mark the example steps, their screenshots and their group headings as remove.
-- diagram: the example process diagram image, to be replaced by the new process's flowchart. Its caption is write.
+- diagram: the example process diagram image, or a box (a one-cell table) marking where the diagram goes, to be replaced by the new process's flowchart. Its caption is write, unless it is generic (e.g. "Figure 1 - Process flowchart"): then keep. Boxes marking where step screenshots go are remove, like the example steps.
 
 When a section's content goes in a table, the guidance paragraphs above it (e.g. "<List of all systems involved>" right above the systems table) are remove, not write, so the content isn't given twice; a neutral introductory sentence that suits any process may be kept.
 
 Keep the document's section headings even if their content is all removed. Never remove the cover, logo, revision history heading or section headings. The revision history table is table_rows (its rows are examples).
 
-step_format: point to the paragraph that shows how one detailed step is written and the heading that groups steps, and give the numbering label and separator they use.
+step_format: point to the paragraph that shows how one detailed step is written and the heading that groups steps, and give the numbering label and separator they use. If a paragraph under the example step gives its application or time (e.g. "Aplicação: <SAP>   Tempo gravado: <00:12>"), point to it as details_index and give the example values as written; it is repeated for every step.
 placeholders: every distinct short placeholder (a value such as a name, not an instruction) inside kept text, the cover and page headers, as written (each spelling once, e.g. both "<Cliente>" and "<cliente>" if both appear).
 """
 
@@ -174,20 +182,33 @@ def validate_analysis(path: str, analysis: TemplateAnalysis) -> None:
         tag = blocks[plan.index].tag.split("}")[1]
         if plan.action.startswith("table_") and tag != "tbl":
             continue
-        if plan.action in ("write", "diagram", "steps") and tag != "p":
+        if plan.action in ("write", "steps") and tag != "p":
+            continue
+        if plan.action == "diagram" and tag not in ("p", "tbl"):  # an example image, or a box marking the place
             continue
         if plan.action == "steps":
             plan.action = "remove"
         if plan.action.startswith("table_"):
             columns = len(Table(blocks[plan.index], doc).columns)
-            plan.header_rows = max(1, plan.header_rows)  # replacing a table's header is never intended
-            if plan.action == "table_answers" and not 0 < plan.answer_column < columns:
-                plan.answer_column = columns - 1  # questions are in the first column, answers after them
+            if plan.action == "table_rows":
+                plan.header_rows = max(1, plan.header_rows)  # replacing a table's header is never intended
+            else:
+                plan.header_rows = max(0, plan.header_rows)  # a question table may have no header row
+                if not 0 < plan.answer_column < columns:
+                    plan.answer_column = columns - 1  # questions are in the first column, answers after them
         valid.append(plan)
     analysis.blocks = valid
+    _check_step_details(doc, blocks, analysis)
     _fill_emptied_sections(doc, blocks, analysis)
-    # Placeholders are only filled in kept text and page headers; the rest is rewritten or removed anyway.
-    kept = [Paragraph(blocks[p.index], doc).text for p in valid if p.action == "keep" and blocks[p.index].tag == qn("w:p")]
+    # Placeholders are only filled in kept text (paragraphs and tables) and page headers; the rest is
+    # rewritten or removed anyway.
+    kept = []
+    for plan in valid:
+        el = blocks[plan.index]
+        if plan.action == "keep" and el.tag == qn("w:p"):
+            kept.append(Paragraph(el, doc).text)
+        elif plan.action == "keep" and el.tag == qn("w:tbl"):
+            kept += [c.text for row in Table(el, doc).rows for c in row.cells]
     for section in doc.sections:
         for part in (section.header, section.footer, section.first_page_header, section.first_page_footer):
             kept += [p.text for p in part.paragraphs]
@@ -201,6 +222,27 @@ def validate_analysis(path: str, analysis: TemplateAnalysis) -> None:
             setattr(fmt, name, None)
     if "{n}" not in fmt.label:
         fmt.label = "{n}."
+
+
+def _check_step_details(doc, blocks: list, analysis: TemplateAnalysis) -> None:
+    """The step details line must be a paragraph holding the example values; it is removed like the example step."""
+    fmt = analysis.step_format
+    index = fmt.details_index
+    if index is None or not (0 <= index < len(blocks) and blocks[index].tag == qn("w:p")):
+        fmt.details_index = fmt.details_application = fmt.details_time = None
+        return
+    text = Paragraph(blocks[index], doc).text
+    if fmt.details_application and fmt.details_application not in text:
+        fmt.details_application = None
+    if fmt.details_time and fmt.details_time not in text:
+        fmt.details_time = None
+    if not fmt.details_application and not fmt.details_time:
+        fmt.details_index = None
+        return
+    for plan in analysis.blocks:
+        if plan.index == index:
+            plan.action, plan.purpose = "remove", ""
+            plan.reason = plan.reason or "example step details"
 
 
 def _heading_level(doc, el) -> int | None:
@@ -221,7 +263,8 @@ def _fill_emptied_sections(doc, blocks: list, analysis: TemplateAnalysis) -> Non
     """
     plans = {p.index: p for p in analysis.blocks}
     fmt = analysis.step_format
-    steps_at = {i for i in (fmt.example_step_index, fmt.example_group_heading_index) if i is not None}
+    steps_at = {i for i in (fmt.example_step_index, fmt.example_group_heading_index, fmt.details_index)
+                if i is not None}
     section: list[int] = []
     heading = None
 
@@ -257,6 +300,8 @@ def summarize_analysis(path: str, analysis: TemplateAnalysis) -> list[dict]:
             table = Table(el, doc)
             text = " | ".join(c.text.strip() for c in table.rows[0].cells) if table.rows else ""
             kind = "table"
+        elif el.tag != qn("w:p"):  # e.g. a content control holding the table of contents
+            text, kind = "".join(el.itertext()).strip(), "paragraph"
         else:
             p = Paragraph(el, doc)
             text = p.text.strip() or ("[image]" if has_image(el) else "")
@@ -307,16 +352,17 @@ class TemplateFill(BaseModel):
 FILL_PROMPT = """You fill a company's Process Design Document (PDD) template for one process. You receive:
 1. The process model: the steps (already written), applications, inputs, key names, requirements and exceptions, worked out from a recording of the process.
 2. The narration of the recording (a meeting or a walkthrough), with timestamps.
-3. The template parts to fill, each with its index, the section it is in, what it must contain and, for tables, the columns or the questions.
-4. The placeholders to fill.
+3. Facts about the recording (file name, recorded duration, number of steps and decision points): use them where the template asks for them.
+4. The template parts to fill, each with its index, the section it is in, what it must contain and, for tables, the columns or the questions.
+5. The placeholders to fill.
 
-Write everything in {language}, in the template's tone (formal, impersonal, as in a process document).
+Write everything in {language}, in the template's tone (formal, impersonal, as in a process document). The document's date is {today}.
 
 Rules:
 - Use only what the process model and the narration state or clearly show. When something isn't stated (client, contact names, versions, login modules, technology, times, risk scores...), write exactly ? (a single question mark) as that cell, answer, paragraph or placeholder value; never invent it and never copy the template's example value. Don't write phrases like "not informed" or "não informado" either: use ?, and the author is shown what is left to complete.
 - write: give the paragraphs, one string per paragraph; for a list, one string per item, without bullet characters.
 - Captions: describe the filled table or the diagram for this process, numbered as in the template (e.g. "Tabela 1 - Campos da planilha de entrada"). Never keep the words "Exemplo"/"Example" from the template's caption.
-- table_rows: one value per column, in the order of the columns given. Each value has the kind and length of the template's example value for that column: where the example is a short level or code (e.g. impact "Médio", required "SIM", "c01"), write a short level or code of that kind (e.g. "Alto", "Médio", "Baixo"), not a sentence; descriptions go in the columns meant for them. Fill the rows the process needs (e.g. one row per application, per input file, per exception). Revision history: one row for the first version, dated {today}, describing the document's creation from the recording; null for the author.
+- table_rows: one value per column, in the order of the columns given. Each value has the kind and length of the template's example value for that column: where the example is a short level or code (e.g. impact "Médio", required "SIM", "c01"), write a short level or code of that kind (e.g. "Alto", "Médio", "Baixo"), not a sentence; descriptions go in the columns meant for them. Fill the rows the process needs (e.g. one row per application, per input file, per exception). Revision history: one row for the first version, dated {today}, describing the document's creation from the recording; ? for the author, unless the template's example row gives the tool that generates the document (e.g. "pidi") as author: then use it.
 - table_answers: one answer per question, in order. Volumes, frequencies, times and people come from the narration when they are said.
 - Exceptions tables: use the process model's exceptions plus situations the narration describes where the normal flow doesn't apply or something can fail, with the step they happen in (e.g. "P4") when known.
 - In/out of scope: what the narration says will or won't be automated; if it says nothing about scope, the activities of the steps are in scope.
@@ -378,8 +424,22 @@ def _model_text(model: ProcessModel) -> str:
     return json.dumps(data, ensure_ascii=False, indent=1)
 
 
+def recording_facts(model: ProcessModel, recording_name: str | None) -> str:
+    """What the code knows for sure about the recording, so the model doesn't have to work it out."""
+    seconds = model.recorded_seconds
+    decisions = [s.number for s in model.decision_points]
+    return "\n".join([
+        f"- Recording file: {recording_name or '?'}",
+        f"- Recorded duration of the steps: {format_timestamp(seconds) if seconds is not None else '?'} "
+        "(includes the narrator's explanations)",
+        f"- Steps: {len(model.as_is)}",
+        f"- Decision points: {len(decisions)}" + (f" (steps {', '.join(map(str, decisions))})" if decisions else ""),
+        f"- Applications, in order of use: {', '.join(model.applications) or '?'}",
+    ])
+
+
 def fill_template(path: str, analysis: TemplateAnalysis, model: ProcessModel, transcript: list[dict],
-                  llm, today: date | None = None) -> TemplateFill:
+                  llm, today: date | None = None, recording_name: str | None = None) -> TemplateFill:
     """Writes the content of every part of the template the analysis marked to fill."""
     narration = "\n".join(f"[{t['start']:.0f}s] {t['text']}" for t in transcript) or "(no narration)"
     placeholders = "\n".join(f"- {p.text}: {p.meaning}" for p in analysis.placeholders) or "(none)"
@@ -387,6 +447,7 @@ def fill_template(path: str, analysis: TemplateAnalysis, model: ProcessModel, tr
         SystemMessage(content=FILL_PROMPT.format(language=analysis.language,
                                                  today=(today or date.today()).strftime("%d/%m/%Y"))),
         HumanMessage(content=f"Process model:\n{_model_text(model)}\n\nNarration:\n{narration}\n\n"
+                             f"Facts about the recording:\n{recording_facts(model, recording_name)}\n\n"
                              f"Template parts to fill:\n{describe_fill_targets(path, analysis)}\n\n"
                              f"Placeholders:\n{placeholders}"),
     ])))
@@ -397,15 +458,17 @@ def fill_template(path: str, analysis: TemplateAnalysis, model: ProcessModel, tr
     return fill
 
 
-UNKNOWN = {"?", "null", "none", "", "n/d"}
+# The model's ways of saying it doesn't know, despite being asked to write "?".
+UNKNOWN = {"?", "null", "none", "", "n/d", "não mencionado", "não informado", "não especificado", "não identificado",
+           "desconhecido", "not mentioned", "not informed", "not specified", "unknown", "no mencionado"}
 
 
 def _known(value: str | None) -> str | None:
     """None for the model's "don't know" answers ('?', or 'null' written as text); "Excel ?" becomes "Excel"."""
-    if value is None or value.strip().lower() in UNKNOWN:
+    if value is None or value.strip().rstrip(".").lower() in UNKNOWN:
         return None
-    # "Excel ?" (unknown version) becomes "Excel"; "Ana -" (unknown email after "<nome> - <email>") "Ana".
-    return re.sub(r"(\s+\?|\s*[-–:,])+$", "", value.strip()) or None
+    # "Excel ?" (unknown version) becomes "Excel"; "Ana ·" (unknown email after "<nome> · <email>") "Ana".
+    return re.sub(r"(\s+\?|\s*[-–:,·])+$", "", value.strip()) or None
 
 
 def normalize_fill(fill: TemplateFill) -> None:

@@ -137,6 +137,69 @@ def test_resumed_run_keeps_its_template(video, template, tmp_path):
     assert "Emissão de faturas" in Document(output).sections[0].header.paragraphs[0].text
 
 
+class FakePidiFill(FakeLLM):
+    """FakeLLM that fills Pidi's template (the default), recording what it was asked."""
+
+    def __init__(self):
+        super().__init__()
+        self.schemas: list = []
+        self.fill_prompt = ""
+
+    def _answer(self, schema, messages):
+        self.schemas.append(schema)
+        if schema is TemplateFill:
+            self.fill_prompt = messages[-1].content
+            return TemplateFill(
+                placeholders=[PlaceholderValue(text="<Nome do Processo>", value="Emissão de faturas"),
+                              PlaceholderValue(text="<Cliente>", value="?"),
+                              PlaceholderValue(text="<1.0>", value="0.1"),
+                              PlaceholderValue(text="<dd/mm/aaaa>", value="16/10/2026")],
+                blocks=[BlockFill(index=11, rows=[["0.1", "16/10/2026", "Documento gerado pelo pidi", "pidi"]]),
+                        BlockFill(index=21, answers=["Intranet", "Lista de clientes", "1", "00:12", "gravacao.mp4"]),
+                        BlockFill(index=40, paragraphs=["O processo emite faturas na intranet."])],
+                step_groups=[StepGroup(title="Preparar", first_step=1), StepGroup(title="Emitir", first_step=4)])
+        return super()._answer(schema, messages)
+
+
+def test_default_is_pidis_template(video, tmp_path):
+    llm = FakePidiFill()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    output, report = run_pdd_pipeline(str(video), str(run_dir), llm=llm, structure_llm=llm,
+                                      transcribe=lambda v, audio_dir: [], recording_name="gravacao.mp4")
+
+    # The template ships analyzed: it is copied into the run, not analyzed again.
+    assert (run_dir / "template.docx").exists() and (run_dir / "template_analysis.json").exists()
+    assert TemplateAnalysis not in llm.schemas
+    assert "Recording file: gravacao.mp4" in llm.fill_prompt and "Decision points: 1 (steps 4)" in llm.fill_prompt
+
+    doc = Document(output)
+    text = _texts(doc)
+    for leftover in ("FBL5N", "Abrir o SAP", "Outlook 2011", "<Nome da etapa>", "Captura de tela", "<SAP>",
+                     "<00:12>", "Fluxograma do processo\n", "<Breve descrição"):
+        assert leftover not in text
+    assert "O processo emite faturas na intranet." in text and "Emissão de faturas" in text
+    # Steps as in the example: label, details line (application, recorded time), group headings numbered on.
+    steps = [p for p in doc.paragraphs if re.match(r"P\d+  ", p.text)]
+    assert len(steps) == report["steps"] and not steps[0].runs[-1].italic
+    details = [p.text for p in doc.paragraphs if p.text.startswith("Aplicação: ")]
+    assert len(details) == report["steps"] and re.fullmatch(r"Aplicação: Intranet     Tempo gravado: \d\d:\d\d", details[0])
+    assert [p.text for p in doc.paragraphs if p.style is not None and p.style.name == "Heading 2"
+            and p.text.startswith("7.")] == \
+        ["7.1. Preparar", "7.2. Emitir"]
+    # The empty table of contents now lists the headings, numbered by their own text.
+    toc = [p for p in doc.element.body.iter(qn("w:p")) if p.find(qn("w:hyperlink")) is not None]
+    toc_text = ["".join(t.text for t in p.iter(qn("w:t"))) for p in toc]
+    assert "1. Histórico de Revisão" in toc_text and "7.2. Emitir" in toc_text
+    assert sum(1 for t in doc.element.body.iter(qn("w:instrText")) if "TOC" in t.text) == 1
+    # Summary answered (it has no header row), flowchart in place of its box, screenshots inserted.
+    summary = next(t for t in doc.tables if t.rows[0].cells[0].text == "Aplicações envolvidas")
+    assert [r.cells[1].text for r in summary.rows] == ["Intranet", "Lista de clientes", "1", "00:12", "gravacao.mp4"]
+    assert len(doc.inline_shapes) == 1 + report["images_inserted"] + int(report["flowchart"])  # + the logo
+    header = " ".join(p.text for p in doc.sections[-1].header.paragraphs)  # the cover has none
+    assert "<Cliente>" in header and "Emissão de faturas" in header  # an unknown value is kept, highlighted
+
+
 def test_placeholder_split_over_runs(tmp_path):
     doc = Document()
     p = doc.add_paragraph("Cliente: ")
@@ -147,9 +210,17 @@ def test_placeholder_split_over_runs(tmp_path):
     assert p.text == "Cliente: Faturas fim"
     assert p.runs[1].bold  # the value takes the formatting of the run the placeholder started in
     q = doc.add_paragraph("<Cliente> e <cliente>")
-    assert replace_in_paragraph(q._p, "<Cliente>", None, "[?]")  # unknown: kept and highlighted
+    assert replace_in_paragraph(q._p, "<Cliente>", None, "[?]")  # unknown: kept and highlighted, only it
     assert q.text == "<Cliente> e <cliente>"
-    assert q._p.find(".//" + qn("w:highlight")) is not None
+    assert [r.text for r in q.runs if r._r.find(".//" + qn("w:highlight")) is not None] == ["<Cliente>"]
+    r = doc.add_paragraph("Para <Cliente>, fim")
+    assert replace_in_paragraph(r._p, "<Cliente>", None, "[?]")
+    assert [run.text for run in r.runs] == ["Para ", "<Cliente>", ", fim"] and r.text == "Para <Cliente>, fim"
+    s = doc.add_paragraph()
+    s.add_run("\t<Cliente> · Faturas")  # a tab before the placeholder isn't highlighted with it
+    assert replace_in_paragraph(s._p, "<Cliente>", None, "[?]")
+    assert [(run.text, run._r.find(".//" + qn("w:highlight")) is not None) for run in s.runs] == \
+        [("\t", False), ("<Cliente>", True), (" · Faturas", False)]
 
 
 def test_garbled_accents_are_repaired():
@@ -159,11 +230,12 @@ def test_garbled_accents_are_repaired():
 
 def test_unknown_answers_and_lists_arenormalize_filld():
     fill = TemplateFill(placeholders=[PlaceholderValue(text="<a>", value="null")],
-                        blocks=[BlockFill(index=1, rows=[["Excel ?", "?", "x"]], answers=["None", "5"],
+                        blocks=[BlockFill(index=1, rows=[["Excel ?", "?", "x"], ["Ana ·", "Não mencionado.", "y"]],
+                                          answers=["None", "5"],
                                           paragraphs=["- Abrir o Excel\n- Salvar o arquivo", "Texto"])])
     normalize_fill(fill)
     assert fill.placeholders[0].value is None
-    assert fill.blocks[0].rows == [["Excel", None, "x"]]
+    assert fill.blocks[0].rows == [["Excel", None, "x"], ["Ana", None, "y"]]
     assert fill.blocks[0].answers == [None, "5"]
     assert fill.blocks[0].paragraphs == ["Abrir o Excel", "Salvar o arquivo", "Texto"]
 

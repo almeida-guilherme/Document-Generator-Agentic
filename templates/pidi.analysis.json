@@ -1,0 +1,606 @@
+{
+  "language": "Brazilian Portuguese",
+  "missing_label": "[A preencher]",
+  "placeholders": [
+    {
+      "text": "<Nome do Processo>",
+      "meaning": "name of the process"
+    },
+    {
+      "text": "<Cliente>",
+      "meaning": "client company the process belongs to"
+    },
+    {
+      "text": "<1.0>",
+      "meaning": "document version: 0.1, the first draft generated from the recording"
+    },
+    {
+      "text": "<dd/mm/aaaa>",
+      "meaning": "date of the document (today), as dd/mm/aaaa"
+    },
+    {
+      "text": "<Nome do autor>",
+      "meaning": "person who writes the document (not the narrator, unless the narration says so)"
+    },
+    {
+      "text": "<tecnologia de RPA>",
+      "meaning": "RPA technology or tool the process will be automated with (e.g. UiPath, Power Automate)"
+    }
+  ],
+  "blocks": [
+    {
+      "index": 0,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 2,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 3,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 4,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 5,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 7,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 8,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 10,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 11,
+      "action": "table_rows",
+      "purpose": "Revision history: one row for the first version, generated from the recording",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 12,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 13,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 14,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 15,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 16,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 17,
+      "action": "table_rows",
+      "purpose": "One row per team (area) involved in or impacted by the process, with its contact and impact level",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 18,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 19,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 20,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 21,
+      "action": "table_answers",
+      "purpose": "Summary of the process: applications involved, inputs, number of decision points, recorded duration and recording file name",
+      "header_rows": 0,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 22,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 23,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 24,
+      "action": "table_rows",
+      "purpose": "One row per application or system used in the process",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 25,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 26,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 27,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 28,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 29,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 30,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 31,
+      "action": "write",
+      "purpose": "The inputs of the process: files, spreadsheets, mailboxes, network folders or systems that feed it",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 32,
+      "action": "table_rows",
+      "purpose": "One row per field of the input spreadsheet or file the process reads (column, field, description, required, format)",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 33,
+      "action": "write",
+      "purpose": "Caption of the input fields table above, numbered as 'Tabela 1 – ...', describing it for this process",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 34,
+      "action": "table_rows",
+      "purpose": "One row per input file, with its location (directory)",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 35,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 36,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 37,
+      "action": "write",
+      "purpose": "The outputs of the process: files, reports, emails or records produced at the end",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 38,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 39,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 40,
+      "action": "write",
+      "purpose": "Brief description of the process as a whole (macro view of the flowchart below)",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 41,
+      "action": "diagram",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 42,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 43,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 44,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 45,
+      "action": "write",
+      "purpose": "Activities of the process that will be automated (one per paragraph)",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 46,
+      "action": "remove",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": "second example item of the in-scope list"
+    },
+    {
+      "index": 47,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 48,
+      "action": "write",
+      "purpose": "Activities of the process that will not be automated (one per paragraph)",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 49,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 50,
+      "action": "table_answers",
+      "purpose": "Metrics and volumes of the process",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 51,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 52,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 53,
+      "action": "remove",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": "example step group heading"
+    },
+    {
+      "index": 54,
+      "action": "remove",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": "example step"
+    },
+    {
+      "index": 55,
+      "action": "remove",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": "example step details"
+    },
+    {
+      "index": 56,
+      "action": "remove",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": "example screenshot box"
+    },
+    {
+      "index": 57,
+      "action": "remove",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": "example step"
+    },
+    {
+      "index": 58,
+      "action": "remove",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": "example step details"
+    },
+    {
+      "index": 59,
+      "action": "remove",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": "example screenshot box"
+    },
+    {
+      "index": 60,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 61,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 62,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 63,
+      "action": "table_rows",
+      "purpose": "One row per business exception: known errors with a predefined action, with the step where they happen",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 64,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 65,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 66,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 67,
+      "action": "table_rows",
+      "purpose": "One row per system exception: unexpected errors, warnings or crashes of the applications, with the step, the system and the action",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 68,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 69,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 70,
+      "action": "keep",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 71,
+      "action": "write",
+      "purpose": "The business rules and requirements of the process (one per paragraph)",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": ""
+    },
+    {
+      "index": 72,
+      "action": "remove",
+      "purpose": "",
+      "header_rows": 1,
+      "answer_column": 1,
+      "reason": "second example item of the list"
+    }
+  ],
+  "step_format": {
+    "example_step_index": 54,
+    "example_group_heading_index": 53,
+    "label": "P{n}",
+    "separator": "  ",
+    "details_index": 55,
+    "details_application": "<SAP>",
+    "details_time": "<00:12>"
+  },
+  "labels": {
+    "decision": "Decisão",
+    "start": "Início",
+    "end": "Fim"
+  }
+}

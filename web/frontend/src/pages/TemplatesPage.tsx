@@ -74,7 +74,7 @@ export default function TemplatesPage() {
         {templates === null ? (
           <p className="muted">Loading…</p>
         ) : templates.length === 0 ? (
-          <p className="subtle">No templates yet. Projects use the default Pidi model until you add one.</p>
+          <p className="subtle">No templates yet. Projects use the Pidi template until you add one.</p>
         ) : (
           <ul className="list">
             {templates.map((t) => (

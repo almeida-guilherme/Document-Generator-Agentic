@@ -22,13 +22,13 @@ def video(tmp_path_factory):
     return path
 
 
-def fake_run(video_path, run_dir, progress, api_key=None):
+def fake_run(video_path, run_dir, progress, api_key=None, **_):
     llm = FakeLLM()
     return run_pdd_pipeline(video_path, run_dir, llm=llm, structure_llm=llm, transcribe=lambda v, audio_dir: [],
                             progress=progress)
 
 
-def fake_template_run(video_path, run_dir, progress, api_key=None):
+def fake_template_run(video_path, run_dir, progress, api_key=None, **_):
     llm = FakeTemplateLLM()
     return run_pdd_pipeline(video_path, run_dir, llm=llm, structure_llm=llm, transcribe=lambda v, audio_dir: [],
                             progress=progress)
@@ -156,7 +156,7 @@ def test_users_only_see_their_own_runs(tmp_path, video):
 def test_failed_run_can_be_retried(tmp_path, video):
     attempts = []
 
-    def flaky(video_path, run_dir, progress, api_key=None):
+    def flaky(video_path, run_dir, progress, api_key=None, **_):
         attempts.append(run_dir)
         if len(attempts) == 1:
             raise RuntimeError("Error code: 429 - insufficient_quota")
@@ -173,7 +173,7 @@ def test_failed_run_can_be_retried(tmp_path, video):
 
 def test_runs_interrupted_by_a_restart_continue(tmp_path, video):
     stuck = threading.Event()
-    with make_client(tmp_path, run_fn=lambda *a: stuck.wait()) as client:
+    with make_client(tmp_path, run_fn=lambda *a, **k: stuck.wait()) as client:
         register(client)
         run_id = upload(client, video).json()["id"]
         engine = client.app.state.engine
@@ -274,7 +274,7 @@ def test_profile_and_password(tmp_path):
 def test_own_api_keys(tmp_path, video):
     used = []
 
-    def run(video_path, run_dir, progress, api_key=None):
+    def run(video_path, run_dir, progress, api_key=None, **_):
         used.append(api_key)
         return fake_run(video_path, run_dir, progress)
 
@@ -314,7 +314,7 @@ def test_own_api_keys(tmp_path, video):
 
 
 def test_run_fails_clearly_when_its_key_was_removed(tmp_path, video):
-    def run(video_path, run_dir, progress, api_key=None):
+    def run(video_path, run_dir, progress, api_key=None, **_):
         return fake_run(video_path, run_dir, progress)
 
     with make_client(tmp_path, run_fn=run) as client:

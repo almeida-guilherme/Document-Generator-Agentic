@@ -43,7 +43,7 @@ export default function ProjectsPage() {
               <div className="bottom">
                 <span className="name">{run.name ?? run.process_name ?? run.video_name}</span>
                 <span className="meta">
-                  {run.template_name ?? "Default template"} · {dateTime(run.finished_at ?? run.created_at)}
+                  {run.template_name ?? "Pidi template"} · {dateTime(run.finished_at ?? run.created_at)}
                 </span>
                 {(run.status === "running" || run.status === "queued") && run.message && (
                   <span className="progress-msg">{run.message}</span>

@@ -75,7 +75,7 @@ export default function NewProjectPage() {
           <label htmlFor="np-template">PDD document template</label>
           <p className="hint">The structure your document will follow.</p>
           <select id="np-template" value={templateId} onChange={(e) => setTemplateId(e.target.value)}>
-            <option value="">Default (Pidi model)</option>
+            <option value="">Pidi template (default)</option>
             {templates.map((t) => <option key={t.id} value={t.id}>{t.name} ({t.language})</option>)}
           </select>
           <p className="after">Using your company's own format? <Link to="/templates">Add a template</Link></p>

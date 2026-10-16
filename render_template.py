@@ -32,10 +32,10 @@ def _runs_with_text(p_el) -> list:
 
 
 def _plain_rpr(run_el):
-    """A copy of a run's formatting without the colour or highlight that marks template placeholders."""
+    """A copy of a run's formatting without the colour, highlight or italics that mark template placeholders."""
     rpr = run_el.find(qn("w:rPr"))
     rpr = copy.deepcopy(rpr) if rpr is not None else OxmlElement("w:rPr")
-    for tag in ("w:color", "w:highlight", "w:shd"):
+    for tag in ("w:color", "w:highlight", "w:shd", "w:i", "w:iCs"):
         for el in rpr.findall(qn(tag)):
             rpr.remove(el)
     return rpr
@@ -110,7 +110,8 @@ def replace_in_paragraph(p_el, old: str, new: str | None, missing_label: str, ig
             before = text[:max(0, start - r_start)]
             after = text[max(0, end - r_start):] if end < r_end else ""
             if new is None:
-                # Leave the text, highlight the runs it covers so the author sees what's missing.
+                # Leave the text, highlight it (only it, not the rest of its run) so the author sees what's missing.
+                run = _isolate(run, len(before), len(text) - len(after))
                 rpr = run.find(qn("w:rPr"))
                 if rpr is None:
                     rpr = OxmlElement("w:rPr")
@@ -134,6 +135,40 @@ def replace_in_paragraph(p_el, old: str, new: str | None, missing_label: str, ig
                         rpr.remove(el)
         if new is None:
             return found
+
+
+def _isolate(run, start: int, end: int):
+    """Splits a run so text[start:end] is a run of its own (same formatting), and returns that run."""
+    ts = run.findall(qn("w:t"))
+    text = "".join(t.text or "" for t in ts)
+    rpr = run.find(qn("w:rPr"))
+    if start == 0:
+        # Tabs or breaks before the text move to a run of their own, so they aren't highlighted with it.
+        lead = [el for el in run if el.tag not in (qn("w:rPr"), qn("w:t"))]
+        if lead:
+            before = OxmlElement("w:r")
+            if rpr is not None:
+                before.append(copy.deepcopy(rpr))
+            for el in lead:
+                before.append(el)  # moves it out of `run`
+            run.addprevious(before)
+    if start == 0 and end == len(text):
+        return run
+    # The original run keeps whatever precedes its text (e.g. a tab) and the first piece of the text.
+    for t in ts[1:]:
+        run.remove(t)
+    ts[0].set(qn("xml:space"), "preserve")
+    ts[0].text = text[:start] if start else text[:end]
+    rest = [text[start:end], text[end:]] if start else [text[end:]]
+    last, middle = run, run
+    for n, piece in enumerate(rest):
+        if piece:
+            new = _new_run(piece, rpr)
+            last.addnext(new)
+            last = new
+            if start and n == 0:
+                middle = new
+    return middle
 
 
 def _all_paragraphs(doc) -> list:
@@ -177,6 +212,17 @@ def _clone_paragraph(p_el, text: str, missing: bool = False):
     new = copy.deepcopy(p_el)
     set_paragraph_text(new, text, missing)
     return new
+
+
+def _missing_paragraph(doc, el, missing_label: str):
+    """The "to fill" marker in place of a paragraph (in its format) or of a table (centred)."""
+    if el.tag == qn("w:p"):
+        return _clone_paragraph(el, missing_label, missing=True)
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p._p.append(_new_run(missing_label, missing=True))
+    p._p.getparent().remove(p._p)
+    return p._p
 
 
 def fill_table(tbl, plan, fill, missing_label: str) -> None:
@@ -238,31 +284,47 @@ def _heading_paragraph(example_heading, text: str):
     return new
 
 
+def _details_paragraph(example_details, fmt, step, missing_label: str):
+    """The step's application and recorded time, written into a copy of the template's example details line."""
+    new = copy.deepcopy(example_details)
+    for example, value in ((fmt.details_application, step.application), (fmt.details_time, step.time)):
+        if example:
+            replace_in_paragraph(new, example, value or "–", missing_label, ignore_case=False)
+    return new
+
+
 def build_steps(doc, model: ProcessModel, analysis: TemplateAnalysis, fill: TemplateFill, blocks: list,
                 stats: dict) -> list:
-    """The detailed steps as paragraphs (group headings, steps, decisions, screenshots), not yet placed."""
+    """The detailed steps as paragraphs (group headings, steps, details, decisions, screenshots), not yet placed."""
     fmt = analysis.step_format
     example_p = blocks[fmt.example_step_index] if fmt.example_step_index is not None else None
     if example_p is None:
         example_p = doc.add_paragraph()._p
         example_p.getparent().remove(example_p)
+    details = blocks[fmt.details_index] if fmt.details_index is not None else None
     heading = blocks[fmt.example_group_heading_index] if fmt.example_group_heading_index is not None else None
     starts = {g.first_step: g.title for g in fill.step_groups} if heading is not None else {}
+    # Group headings numbered in their text ("7.1. Login SAP") are numbered on from the example's number.
+    number = re.match(r"^((?:\d+\.)*)(\d+)(\.?\s+)", Paragraph(heading, None).text) if heading is not None else None
 
     # The model sometimes copies the template's numbering into the text ("P4 - Abrir..."); the label is added here.
     own_label = re.compile(r"^\s*" + re.escape(fmt.label).replace(re.escape("{n}"), r"\d+") + r"\s*[-–:.]?\s*")
     out = []
     for step in model.as_is:
         if step.number in starts:
-            out.append(_heading_paragraph(heading, starts[step.number]))
-        p = _step_paragraph(example_p, fmt.label.replace("{n}", str(step.number)), fmt.separator,
-                            own_label.sub("", step.instruction, count=1))
-        out.append(p)
+            prefix = f"{number[1]}{int(number[2]) + len([s for s in starts if s < step.number])}{number[3]}" \
+                if number else ""
+            out.append(_heading_paragraph(heading, prefix + starts[step.number]))
+        text = [_step_paragraph(example_p, fmt.label.replace("{n}", str(step.number)), fmt.separator,
+                                own_label.sub("", step.instruction, count=1))]
+        if details is not None:
+            text.append(_details_paragraph(details, fmt, step, analysis.missing_label))
         if step.decision:
-            out.append(_step_paragraph(example_p, f"{analysis.labels.decision}:", " ", step.decision))
-        for text_p in out[-2 if step.decision else -1:]:
+            text.append(_step_paragraph(example_p, f"{analysis.labels.decision}:", " ", step.decision))
+        for text_p in text:
             # A step's text stays on the page of its screenshot.
             Paragraph(text_p, None).paragraph_format.keep_with_next = True
+        out += text
         image = step.main_frame_path
         if image and os.path.exists(image):
             out.append(_picture_paragraph(doc, image))
@@ -288,9 +350,12 @@ def rebuild_toc(doc, old_numbers: dict[str, str]) -> None:
     document is opened, since updateFields is set.
     """
     body = doc.element.body
-    toc = [p for p in body.iter(qn("w:p")) if is_toc(Paragraph(p, doc))]
+    toc = [p for p in body.iter(qn("w:p")) if is_toc(Paragraph(p, doc))] or _empty_toc_field(body)
     if not toc:
         return
+    instruction = "".join(t.text or "" for p in toc for t in p.iter(qn("w:instrText")))
+    levels = re.search(r'\\o\s+"(\d)-(\d)"', instruction)
+    max_level = int(levels.group(2)) if levels else 3
     first = toc[0]
     # The field's start (begin, instruction, separate) is in the first entry; keep it, drop the entries.
     field_start = []
@@ -303,7 +368,8 @@ def rebuild_toc(doc, old_numbers: dict[str, str]) -> None:
     styles_by_level = {}
     for p in toc:
         style = p.find(qn("w:pPr"))
-        level = re.search(r"\d", Paragraph(p, doc).style.name or "")
+        entry_style = Paragraph(p, doc).style
+        level = re.search(r"\d", entry_style.name or "") if entry_style is not None else None
         if style is not None and level:
             styles_by_level.setdefault(int(level.group()), style)
     end_p = toc[-1]
@@ -314,13 +380,15 @@ def rebuild_toc(doc, old_numbers: dict[str, str]) -> None:
     bookmark_id = 9000
     for p in body.iter(qn("w:p")):
         level = _heading_level(doc, p)
-        if level is None or level > 3 or p in toc:
+        if level is None or level > max_level or p in toc:
             continue
         text = Paragraph(p, doc).text.strip()
         if not text:
             continue
         number = old_numbers.get(text)
-        if number is None:
+        if re.match(r"\d+(\.\d+)*\.?\s", text):
+            number = ""  # numbered in its own text ("4.1. Entradas")
+        elif number is None:
             counters[level] = counters.get(level, 0) + 1
             number = f"{numbers.get(level - 1, '')}{counters[level]}." if level > 1 else ""
         else:
@@ -345,6 +413,11 @@ def rebuild_toc(doc, old_numbers: dict[str, str]) -> None:
             style = styles_by_level[min(styles_by_level)]
         if style is not None:
             entry.append(copy.deepcopy(style))
+        elif level > 1:  # no entry styles to copy: indent the lower levels
+            ppr, ind = OxmlElement("w:pPr"), OxmlElement("w:ind")
+            ind.set(qn("w:left"), str(360 * (level - 1)))
+            ppr.append(ind)
+            entry.append(ppr)
         link = OxmlElement("w:hyperlink")
         link.set(qn("w:anchor"), name)
         link.append(_new_run(f"{number}\t{text}" if number else text))
@@ -365,6 +438,27 @@ def rebuild_toc(doc, old_numbers: dict[str, str]) -> None:
             end_p.remove(child)
     for entry in entries:
         end_p.addprevious(entry)
+
+
+def _empty_toc_field(body) -> list:
+    """
+    A table of contents that was never computed has no entries, only its field: the paragraph where it
+    begins (with the TOC instruction) and the one where it ends, which are treated as its first and last entry.
+    """
+    for p in body.iter(qn("w:p")):
+        if not "".join(t.text or "" for t in p.iter(qn("w:instrText"))).strip().upper().startswith("TOC"):
+            continue
+        depth, paragraph = 0, p
+        while paragraph is not None:
+            for char in paragraph.iter(qn("w:fldChar")):
+                kind = char.get(qn("w:fldCharType"))
+                depth += 1 if kind == "begin" else -1 if kind == "end" else 0
+            if depth <= 0:  # a field begun and ended in one paragraph is left for Word to compute
+                return [] if paragraph is p else [p, paragraph]
+            paragraph = paragraph.getnext()
+            while paragraph is not None and paragraph.tag != qn("w:p"):
+                paragraph = paragraph.getnext()
+    return []
 
 
 def _old_toc_numbers(doc) -> dict[str, str]:
@@ -426,11 +520,12 @@ def render_template(template_path: str, analysis: TemplateAnalysis, fill: Templa
             try:
                 chart = build_flowchart(model, os.path.join(os.path.dirname(output_path), "flowchart"),
                                         start_label=analysis.labels.start, end_label=analysis.labels.end)
-                el.addprevious(_picture_paragraph(doc, chart, el, MAX_DIAGRAM_HEIGHT))
+                # In place of an example image (keeping its paragraph's layout) or of a box marking the place.
+                el.addprevious(_picture_paragraph(doc, chart, el if el.tag == qn("w:p") else None, MAX_DIAGRAM_HEIGHT))
                 stats["flowchart"] = True
             except Exception as e:
                 print(f"Failed to generate/insert flowchart: {e}")
-                el.addprevious(_clone_paragraph(el, missing, missing=True))
+                el.addprevious(_missing_paragraph(doc, el, missing))
             remove.append(el)
 
     # The steps go where the template's example steps start (their group heading, if any).

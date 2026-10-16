@@ -36,10 +36,14 @@ TRANSCRIPT_FILE = "transcript.json"
 MODEL_FILE = "process_model.json"
 NAME_CHECKS_FILE = "name_checks.json"
 REPORT_FILE = "report.json"
-# A run documented with a company template keeps its own copy of the template and of its analysis.
+# A run keeps its own copy of the template it is written into and of the template's analysis.
 TEMPLATE_FILE = "template.docx"
 TEMPLATE_ANALYSIS_FILE = "template_analysis.json"
 TEMPLATE_FILL_FILE = "template_fill.json"
+# Pidi's own template, used when no company template is given. Its analysis was checked by hand and ships
+# with it, so it is never analyzed again.
+DEFAULT_TEMPLATE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "pidi.docx")
+DEFAULT_ANALYSIS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates", "pidi.analysis.json")
 
 
 def new_run_dir(video_path: str, base_dir: str = "runs") -> str:
@@ -87,6 +91,7 @@ class PipelineState(TypedDict, total=False):
     transcript: list[dict]
     model: ProcessModel
     template_path: str | None
+    recording_name: str | None
     analysis: TemplateAnalysis
     fill: TemplateFill
     output_path: str
@@ -94,14 +99,15 @@ class PipelineState(TypedDict, total=False):
     report: Annotated[dict, operator.or_]
 
 
-# Stages in the order they run, for progress displays ("reuse_run" replaces extract_frames to transcribe).
-STAGES = ["extract_frames", "caption", "transcribe", "structure", "verify_names", "render"]
-TEMPLATE_STAGES = ["analyze_template", "extract_frames", "caption", "transcribe", "structure", "verify_names",
-                   "fill_template", "render"]
+# Stages in the order they run, for progress displays ("reuse_run" replaces extract_frames to transcribe):
+# with Pidi's template, with a company template (analyzed first) and in the standard layout (no template).
+STAGES = ["extract_frames", "caption", "transcribe", "structure", "verify_names", "fill_template", "render"]
+TEMPLATE_STAGES = ["analyze_template", *STAGES]
+STANDARD_STAGES = [s for s in STAGES if s != "fill_template"]
 
 
-def stages_for(with_template: bool) -> list[str]:
-    return TEMPLATE_STAGES if with_template else STAGES
+def stages_for(company_template: bool) -> list[str]:
+    return TEMPLATE_STAGES if company_template else STAGES
 
 
 def console_progress(stage: str, message: str, done: bool, stages: list[str] = STAGES) -> None:
@@ -126,6 +132,9 @@ def build_graph(llm, structure_llm, transcribe: Callable, frame_options: dict, c
 
         START ─┬─ analyze_template ─┬─┬─ extract_frames ─ caption ─ transcribe ─┬─ structure ─ verify_names ─┬─ fill_template ─┬─ render ─ END
                └────────────────────┘ └─ reuse_run ──────────────────────────────┘                            └─────────────────┘
+
+    analyze_template runs only for a company template not analyzed yet (Pidi's template ships analyzed);
+    fill_template is skipped only in the standard layout.
     """
 
     def analyze_template_node(state: PipelineState) -> PipelineState:
@@ -241,7 +250,7 @@ def build_graph(llm, structure_llm, transcribe: Callable, frame_options: dict, c
             return {"fill": fill}
         progress("fill_template", "Writing the template's sections for this process", False)
         fill = fill_template(state["template_path"], state["analysis"], state["model"], state["transcript"],
-                             structure_llm)
+                             structure_llm, recording_name=state.get("recording_name"))
         _save(run_dir, TEMPLATE_FILL_FILE, fill.model_dump())
         unknown = sum(1 for p in fill.placeholders if p.value is None)
         progress("fill_template", f"{len(fill.blocks)} template parts written, {unknown} placeholder(s) left for "
@@ -272,8 +281,8 @@ def build_graph(llm, structure_llm, transcribe: Callable, frame_options: dict, c
     def recording_source(state: PipelineState) -> str:
         return "reuse_run" if state.get("from_run") else "extract_frames"
 
-    graph.add_conditional_edges(START, lambda s: "analyze_template" if s.get("template_path") else recording_source(s),
-                                ["analyze_template", "reuse_run", "extract_frames"])
+    graph.add_conditional_edges(START, lambda s: "analyze_template" if s.get("template_path") and not s.get("analysis")
+                                else recording_source(s), ["analyze_template", "reuse_run", "extract_frames"])
     graph.add_conditional_edges("analyze_template", recording_source, ["reuse_run", "extract_frames"])
     graph.add_edge("extract_frames", "caption")
     graph.add_edge("caption", "transcribe")
@@ -300,6 +309,8 @@ def run_pdd_pipeline(
     progress: Callable[[str, str, bool], None] | None = None,
     template_path: str | None = None,
     api_key: str | None = None,
+    recording_name: str | None = None,
+    standard_layout: bool = False,
 ) -> tuple[str, dict]:
     """
     Runs the full PDD generation pipeline for a single video.
@@ -316,10 +327,13 @@ def run_pdd_pipeline(
         from_run: an earlier run folder of the same video; its frames, captions and transcript are reused,
             so only structuring and rendering run again.
         progress: called with (stage, message, done) as the run advances; prints to the console by default.
-        template_path: a company PDD template (.docx) to write the document into, instead of the standard
-            layout. It is copied into the run folder (so is its analysis), and a run folder that has one
+        template_path: a company PDD template (.docx) to write the document into, instead of Pidi's
+            template. It is copied into the run folder (so is its analysis), and a run folder that has one
             uses it when resumed.
         api_key: the OpenAI key the default models and transcription use; by default OPENAI_API_KEY.
+        recording_name: the recording's file name as shown in the document; by default video_path's.
+        standard_layout: without a template, write the document in the standard layout (render.py)
+            instead of Pidi's template.
 
     Returns:
         path to the generated .docx file, and the run report (also saved as report.json).
@@ -327,8 +341,13 @@ def run_pdd_pipeline(
     if not os.path.isfile(video_path):
         raise FileNotFoundError(f"Video not found: {video_path}")
     template_path = use_template(run_dir, template_path)
+    if template_path is None and not standard_layout:
+        template_path = use_template(run_dir, DEFAULT_TEMPLATE)
+        shutil.copyfile(DEFAULT_ANALYSIS, os.path.join(run_dir, TEMPLATE_ANALYSIS_FILE))
+    saved = _load(run_dir, TEMPLATE_ANALYSIS_FILE) if template_path else None
+    analysis = TemplateAnalysis.model_validate(saved) if saved is not None else None
     if progress is None:
-        stages = stages_for(template_path is not None)
+        stages = STANDARD_STAGES if template_path is None else STAGES if analysis else TEMPLATE_STAGES
         progress = lambda stage, message, done: console_progress(stage, message, done, stages)  # noqa: E731
     llm = llm or ChatOpenAI(model=CAPTION_MODEL, max_retries=5, api_key=api_key)
     # Temperature 0 so two runs over the same captions give (nearly) the same steps.
@@ -340,9 +359,13 @@ def run_pdd_pipeline(
 
     report: dict = {"video": video_path, "caption_model": getattr(llm, "model_name", None),
                     "structure_model": getattr(structure_llm, "model_name", None), "reused_run": from_run}
+    initial: PipelineState = {"video_path": video_path, "run_dir": run_dir, "from_run": from_run,
+                              "template_path": template_path, "report": report,
+                              "recording_name": recording_name or os.path.basename(video_path)}
+    if analysis is not None:
+        initial["analysis"] = analysis
     with get_usage_metadata_callback() as usage:
-        state = graph.invoke({"video_path": video_path, "run_dir": run_dir, "from_run": from_run,
-                              "template_path": template_path, "report": report})
+        state = graph.invoke(initial)
 
     report = state["report"]
     token_cost, unknown = usage_cost(usage.usage_metadata)
