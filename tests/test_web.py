@@ -1,4 +1,5 @@
 """The website's API, offline: the pipeline runs with the fake model on the synthetic recording."""
+import json
 import threading
 import time
 import pytest
@@ -21,13 +22,13 @@ def video(tmp_path_factory):
     return path
 
 
-def fake_run(video_path, run_dir, progress):
+def fake_run(video_path, run_dir, progress, api_key=None):
     llm = FakeLLM()
     return run_pdd_pipeline(video_path, run_dir, llm=llm, structure_llm=llm, transcribe=lambda v, audio_dir: [],
                             progress=progress)
 
 
-def fake_template_run(video_path, run_dir, progress):
+def fake_template_run(video_path, run_dir, progress, api_key=None):
     llm = FakeTemplateLLM()
     return run_pdd_pipeline(video_path, run_dir, llm=llm, structure_llm=llm, transcribe=lambda v, audio_dir: [],
                             progress=progress)
@@ -35,7 +36,13 @@ def fake_template_run(video_path, run_dir, progress):
 
 def make_client(tmp_path, run_fn=fake_run, **settings) -> TestClient:
     s = Settings(data_dir=tmp_path / "data", frontend_dir=tmp_path / "no-frontend", **settings)
-    return TestClient(create_app(s, run_fn=run_fn, analyze_template=lambda path: analysis_for_fixture()))
+    return TestClient(create_app(s, run_fn=run_fn, analyze_template=lambda path, api_key: analysis_for_fixture(),
+                                 check_api_key=fake_check_key))
+
+
+def fake_check_key(key):
+    if "bad" in key:
+        raise ValueError("OpenAI refused this key.")
 
 
 def register(client, email="ana@example.com", password="correct horse"):
@@ -149,7 +156,7 @@ def test_users_only_see_their_own_runs(tmp_path, video):
 def test_failed_run_can_be_retried(tmp_path, video):
     attempts = []
 
-    def flaky(video_path, run_dir, progress):
+    def flaky(video_path, run_dir, progress, api_key=None):
         attempts.append(run_dir)
         if len(attempts) == 1:
             raise RuntimeError("Error code: 429 - insufficient_quota")
@@ -237,3 +244,90 @@ def test_templates(tmp_path, video):
             response = client.post("/api/runs", files={"file": ("x.mp4", f, "video/mp4")},
                                    data={"template_id": mine["id"]})
         assert response.status_code == 404
+
+
+def test_profile_and_password(tmp_path):
+    with make_client(tmp_path) as client:
+        response = client.post("/api/auth/register",
+                               json={"email": "ana@example.com", "password": "correct horse", "name": " Ana Lima "})
+        assert response.json()["name"] == "Ana Lima"
+        updated = client.patch("/api/auth/me", json={"name": "Ana L.", "email": "Ana.Lima@Example.com"})
+        assert updated.status_code == 200 and updated.json() == {**updated.json(), "name": "Ana L.",
+                                                                  "email": "ana.lima@example.com"}
+        register(client, "bo@example.com")  # now logged in as Bo
+        assert client.patch("/api/auth/me", json={"name": "Bo", "email": "ana.lima@example.com"}).status_code == 409
+
+        # A second session for Bo, then a password change: the other session ends, this one continues.
+        old_cookie = client.cookies.get("pdd_session")
+        assert client.post("/api/auth/password", json={"current_password": "wrong pass",
+                                                       "new_password": "new password"}).status_code == 403
+        assert client.post("/api/auth/password", json={"current_password": "correct horse",
+                                                       "new_password": "short"}).status_code == 422
+        assert client.post("/api/auth/password", json={"current_password": "correct horse",
+                                                       "new_password": "new password"}).status_code == 204
+        assert client.get("/api/auth/me").status_code == 200
+        client.cookies.set("pdd_session", old_cookie)
+        assert client.get("/api/auth/me").status_code == 401
+        assert client.post("/api/auth/login", json={"email": "bo@example.com", "password": "new password"}).status_code == 200
+
+
+def test_own_api_keys(tmp_path, video):
+    used = []
+
+    def run(video_path, run_dir, progress, api_key=None):
+        used.append(api_key)
+        return fake_run(video_path, run_dir, progress)
+
+    with make_client(tmp_path, run_fn=run, allow_server_key=False) as client:
+        register(client)
+        assert client.get("/api/keys").json() == {"keys": [], "server_key": False}
+        # Without a key of their own (and no server key) nothing can run.
+        assert upload(client, video).status_code == 400
+
+        assert client.post("/api/keys", json={"name": "Work", "key": "sk-bad-0000000000000000"}).status_code == 422
+        assert client.post("/api/keys", json={"name": "Work", "key": "short"}).status_code == 422
+        secret = "sk-proj-abcdefghijklmnopqrstuv4F2a"
+        key = client.post("/api/keys", json={"name": "Work", "key": secret})
+        assert key.status_code == 201, key.text
+        key = key.json()
+        assert key["hint"] == "sk-…4F2a" and secret not in json.dumps(client.get("/api/keys").json())
+        assert secret not in (tmp_path / "data" / "app.db").read_bytes().decode("latin-1")  # stored encrypted
+
+        with open(video, "rb") as f:
+            response = client.post("/api/runs", files={"file": ("x.mp4", f, "video/mp4")},
+                                   data={"name": "Invoice approval", "api_key_id": key["id"]})
+        run_out = wait_for(client, response.json()["id"])
+        assert run_out["status"] == "done" and run_out["name"] == "Invoice approval"
+        assert used == [secret]  # the job ran on the user's own key
+        assert "Invoice%20approval%20-%20PDD.docx" in client.get(
+            f"/api/runs/{run_out['id']}/document").headers["content-disposition"]
+
+        # Another user can't use or see the key.
+        client.post("/api/auth/logout")
+        register(client, "bo@example.com")
+        assert client.get("/api/keys").json()["keys"] == []
+        assert client.delete(f"/api/keys/{key['id']}").status_code == 404
+        with open(video, "rb") as f:
+            response = client.post("/api/runs", files={"file": ("x.mp4", f, "video/mp4")},
+                                   data={"api_key_id": key["id"]})
+        assert response.status_code == 404
+
+
+def test_run_fails_clearly_when_its_key_was_removed(tmp_path, video):
+    def run(video_path, run_dir, progress, api_key=None):
+        return fake_run(video_path, run_dir, progress)
+
+    with make_client(tmp_path, run_fn=run) as client:
+        register(client)
+        key = client.post("/api/keys", json={"name": "Work", "key": "sk-proj-abcdefghijklmnopqrstuv4F2a"}).json()
+        client.app.state.jobs.stop()  # keep the run queued while the key is removed
+        time.sleep(0.3)
+        with open(video, "rb") as f:
+            run_id = client.post("/api/runs", files={"file": ("x.mp4", f, "video/mp4")},
+                                 data={"api_key_id": key["id"]}).json()["id"]
+        assert client.delete(f"/api/keys/{key['id']}").status_code == 204
+        jobs = client.app.state.jobs
+        jobs._stop = False
+        jobs.start()
+        run = wait_for(client, run_id)
+        assert run["status"] == "failed" and "API key chosen for this project was removed" in run["error"]

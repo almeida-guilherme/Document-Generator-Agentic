@@ -24,6 +24,8 @@ class Settings:
     workers: int = field(default_factory=lambda: int(os.getenv("PDD_WORKERS", "1")))
     # Set to true when the site is served over HTTPS, so the login cookie is never sent over plain HTTP.
     cookie_secure: bool = field(default_factory=lambda: _bool("PDD_COOKIE_SECURE", False))
+    # Offer the server's own OPENAI_API_KEY to people who haven't connected a key of their own.
+    allow_server_key: bool = field(default_factory=lambda: _bool("PDD_ALLOW_SERVER_KEY", True))
     session_days: int = field(default_factory=lambda: int(os.getenv("PDD_SESSION_DAYS", "7")))
     frontend_dir: Path = field(default_factory=lambda: Path(os.getenv(
         "PDD_FRONTEND_DIR", Path(__file__).parent / "frontend" / "dist")))

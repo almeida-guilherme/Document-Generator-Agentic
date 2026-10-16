@@ -1,4 +1,5 @@
 import contextvars
+import functools
 import json
 import shutil
 import operator
@@ -7,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Annotated, Callable, TypedDict
 from langchain_openai import ChatOpenAI
+from openai import OpenAI
 from langchain_core.callbacks import get_usage_metadata_callback
 from langgraph.graph import StateGraph, START, END
 
@@ -297,6 +299,7 @@ def run_pdd_pipeline(
     from_run: str | None = None,
     progress: Callable[[str, str, bool], None] | None = None,
     template_path: str | None = None,
+    api_key: str | None = None,
 ) -> tuple[str, dict]:
     """
     Runs the full PDD generation pipeline for a single video.
@@ -316,6 +319,7 @@ def run_pdd_pipeline(
         template_path: a company PDD template (.docx) to write the document into, instead of the standard
             layout. It is copied into the run folder (so is its analysis), and a run folder that has one
             uses it when resumed.
+        api_key: the OpenAI key the default models and transcription use; by default OPENAI_API_KEY.
 
     Returns:
         path to the generated .docx file, and the run report (also saved as report.json).
@@ -326,9 +330,11 @@ def run_pdd_pipeline(
     if progress is None:
         stages = stages_for(template_path is not None)
         progress = lambda stage, message, done: console_progress(stage, message, done, stages)  # noqa: E731
-    llm = llm or ChatOpenAI(model=CAPTION_MODEL, max_retries=5)
+    llm = llm or ChatOpenAI(model=CAPTION_MODEL, max_retries=5, api_key=api_key)
     # Temperature 0 so two runs over the same captions give (nearly) the same steps.
-    structure_llm = structure_llm or ChatOpenAI(model=STRUCTURE_MODEL, temperature=0, max_retries=5)
+    structure_llm = structure_llm or ChatOpenAI(model=STRUCTURE_MODEL, temperature=0, max_retries=5, api_key=api_key)
+    if api_key and transcribe is transcribe_audio:
+        transcribe = functools.partial(transcribe_audio, client=OpenAI(api_key=api_key))
     graph = build_graph(llm, structure_llm, transcribe, frame_options or {}, caption_width, max_frames_per_window,
                         progress)
 

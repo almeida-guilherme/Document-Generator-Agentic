@@ -11,7 +11,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from web import auth, runs, templates
+from web import auth, keys, runs, templates
 from web.config import Settings
 from web.db import make_engine
 from web.jobs import JobRunner, RunFn, default_run_fn
@@ -26,12 +26,12 @@ SECURITY_HEADERS = {
 
 
 def create_app(settings: Settings | None = None, run_fn: RunFn = default_run_fn, start_jobs: bool = True,
-               analyze_template=templates.default_analyze) -> FastAPI:
+               analyze_template=templates.default_analyze, check_api_key=keys.check_openai_key) -> FastAPI:
     load_dotenv()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     settings = settings or Settings()
     engine = make_engine(settings.database_url)
-    jobs = JobRunner(engine, settings.runs_dir, run_fn, settings.workers)
+    jobs = JobRunner(engine, settings.runs_dir, run_fn, settings.workers, settings.secret_key)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -44,6 +44,8 @@ def create_app(settings: Settings | None = None, run_fn: RunFn = default_run_fn,
     app.state.settings, app.state.engine, app.state.jobs = settings, engine, jobs
     # analyze_template(path) -> TemplateAnalysis; swapped for a fake in tests.
     app.state.analyze_template = analyze_template
+    # check_api_key(key) raises ValueError if the provider refuses it; swapped for a fake in tests.
+    app.state.check_api_key = check_api_key
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -55,6 +57,7 @@ def create_app(settings: Settings | None = None, run_fn: RunFn = default_run_fn,
     app.include_router(auth.router)
     app.include_router(runs.router)
     app.include_router(templates.router)
+    app.include_router(keys.router)
 
     @app.get("/api/health")
     def health():

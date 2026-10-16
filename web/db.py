@@ -12,6 +12,9 @@ class User(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     email: str = Field(index=True, unique=True)
     password_hash: str
+    name: str | None = None
+    # Part of every session token; changing the password increases it, which logs out other sessions.
+    session_version: int | None = 0
     created_at: datetime = Field(default_factory=utcnow)
 
 
@@ -27,9 +30,23 @@ class Run(SQLModel, table=True):
     error: str | None = None
     process_name: str | None = None
     template_name: str | None = None      # the company template the document is written into, if any
+    name: str | None = None               # the project's name, as the user typed it
+    api_key_id: str | None = None         # the user's API key it runs on; None: the server's key
     created_at: datetime = Field(default_factory=utcnow)
     started_at: datetime | None = None
     finished_at: datetime | None = None
+
+
+class ApiKey(SQLModel, table=True):
+    """A user's own API key (see web/keys.py); `secret` is encrypted, `prefix` and `last4` are for display."""
+    id: str = Field(default_factory=lambda: uuid4().hex, primary_key=True)
+    user_id: int = Field(foreign_key="user.id", index=True)
+    provider: str
+    name: str
+    prefix: str
+    last4: str
+    secret: str
+    created_at: datetime = Field(default_factory=utcnow)
 
 
 class Template(SQLModel, table=True):

@@ -15,6 +15,7 @@ from sqlmodel import select
 
 from web.auth import current_user
 from web.db import Template, User, session
+from web.keys import key_value, pick_key
 
 router = APIRouter(prefix="/api/templates", tags=["templates"])
 
@@ -46,11 +47,12 @@ class TemplateDetail(TemplateOut):
     blocks: list[TemplateBlock]
 
 
-def default_analyze(path: str):
+def default_analyze(path: str, api_key: str | None = None):
+    """Analyzes a template with the user's API key (None: the server's)."""
     from langchain_openai import ChatOpenAI
     from pipeline import STRUCTURE_MODEL
     from template import analyze_template
-    return analyze_template(path, ChatOpenAI(model=STRUCTURE_MODEL, temperature=0, max_retries=5))
+    return analyze_template(path, ChatOpenAI(model=STRUCTURE_MODEL, temperature=0, max_retries=5, api_key=api_key))
 
 
 def template_dir(request: Request, template: Template) -> Path:
@@ -84,6 +86,7 @@ def create_template(request: Request, file: UploadFile = File(...), user: User =
     name = os.path.basename(file.filename or "template.docx")
     if not name.lower().endswith(".docx"):
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "Upload the template as a Word document (.docx).")
+    api_key = key_value(request, pick_key(request, user, None))  # the user's newest key, else the server's
     template = Template(user_id=user.id, name=name, language="")
     folder = template_dir(request, template)
     folder.mkdir(parents=True)
@@ -100,7 +103,7 @@ def create_template(request: Request, file: UploadFile = File(...), user: User =
             Document(str(path))
         except Exception:
             raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, "The file could not be read as a Word document.")
-        analysis = request.app.state.analyze_template(str(path))
+        analysis = request.app.state.analyze_template(str(path), api_key)
         (folder / ANALYSIS_FILE).write_text(json.dumps(analysis.model_dump(), ensure_ascii=False, indent=2),
                                             encoding="utf-8")
     except BaseException:

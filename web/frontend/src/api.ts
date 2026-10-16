@@ -1,7 +1,10 @@
 // Typed calls to the FastAPI backend (web/). The session is an httpOnly cookie, so requests only need
 // to be same-origin; nothing is stored in the browser by this code.
 
-export type User = { id: number; email: string };
+export type User = { id: number; email: string; name: string };
+
+export type ApiKey = { id: string; provider: string; name: string; hint: string; created_at: string };
+export type Keys = { keys: ApiKey[]; server_key: boolean };
 
 export type RunStatus = "queued" | "running" | "done" | "failed";
 
@@ -23,6 +26,7 @@ export type Run = {
   message: string | null;
   error: string | null;
   process_name: string | null;
+  name: string | null;
   template_name: string | null;
   stages: string[];
   created_at: string;
@@ -89,8 +93,8 @@ async function errorMessage(response: Response): Promise<string> {
   return `Request failed (${response.status}).`;
 }
 
-const json = (body: unknown): RequestInit => ({
-  method: "POST",
+const json = (body: unknown, method = "POST"): RequestInit => ({
+  method,
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify(body),
 });
@@ -98,7 +102,14 @@ const json = (body: unknown): RequestInit => ({
 export const api = {
   me: () => request<User>("/api/auth/me"),
   login: (email: string, password: string) => request<User>("/api/auth/login", json({ email, password })),
-  register: (email: string, password: string) => request<User>("/api/auth/register", json({ email, password })),
+  register: (name: string, email: string, password: string) =>
+    request<User>("/api/auth/register", json({ name, email, password })),
+  updateProfile: (name: string, email: string) => request<User>("/api/auth/me", json({ name, email }, "PATCH")),
+  changePassword: (current_password: string, new_password: string) =>
+    request<void>("/api/auth/password", json({ current_password, new_password })),
+  keys: () => request<Keys>("/api/keys"),
+  addKey: (name: string, key: string) => request<ApiKey>("/api/keys", json({ provider: "openai", name, key })),
+  removeKey: (id: string) => request<void>(`/api/keys/${id}`, { method: "DELETE" }),
   logout: () => request<void>("/api/auth/logout", { method: "POST" }),
   runs: () => request<Run[]>("/api/runs"),
   run: (id: string) => request<Run>(`/api/runs/${id}`),
@@ -117,7 +128,9 @@ export const api = {
 };
 
 /** Uploads a recording with progress (fetch can't report upload progress, XMLHttpRequest can). */
-export function uploadRecording(file: File, templateId: string | null, onProgress: (fraction: number) => void): Promise<Run> {
+export type NewProject = { name: string; templateId: string | null; apiKeyId: string | null };
+
+export function uploadRecording(file: File, project: NewProject, onProgress: (fraction: number) => void): Promise<Run> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open("POST", "/api/runs");
@@ -135,7 +148,9 @@ export function uploadRecording(file: File, templateId: string | null, onProgres
     xhr.onerror = () => reject(new ApiError(0, "The upload was interrupted. Check your connection and try again."));
     const form = new FormData();
     form.append("file", file);
-    if (templateId) form.append("template_id", templateId);
+    if (project.name.trim()) form.append("name", project.name.trim());
+    if (project.templateId) form.append("template_id", project.templateId);
+    if (project.apiKeyId) form.append("api_key_id", project.apiKeyId);
     xhr.send(form);
   });
 }

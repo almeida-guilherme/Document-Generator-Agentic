@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, ApiError, type ProcessModel, type Run } from "../api";
+import { StatusPill } from "../components";
 import { INPUT_KINDS, REQUIREMENT_LABELS, STAGE_LABELS, dateTime, duration } from "../format";
 import { usePolling } from "../usePolling";
-import { StatusBadge } from "./RunsPage";
 
 export default function RunPage() {
   const { id = "" } = useParams();
@@ -13,7 +13,7 @@ export default function RunPage() {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    api.run(id).then(setRun, (e: ApiError) => setError(e.status === 404 ? "This document doesn't exist." : e.message));
+    api.run(id).then(setRun, (e: ApiError) => setError(e.status === 404 ? "This project doesn't exist." : e.message));
   }, [id]);
   useEffect(load, [load]);
   const active = run?.status === "queued" || run?.status === "running";
@@ -28,7 +28,7 @@ export default function RunPage() {
   }
 
   async function remove() {
-    if (!confirm("Delete this document, its screenshots and the uploaded recording?")) return;
+    if (!confirm("Delete this project, its document, screenshots and the uploaded recording?")) return;
     try {
       await api.remove(id);
       navigate("/");
@@ -37,22 +37,23 @@ export default function RunPage() {
     }
   }
 
-  if (error && !run) return <section className="card"><p className="error">{error}</p><Link to="/">Back</Link></section>;
-  if (!run) return <p className="muted">Loading…</p>;
+  if (error && !run) {
+    return <main className="page wide"><p className="error">{error}</p><Link to="/" className="back">← Back to projects</Link></main>;
+  }
+  if (!run) return <main className="page wide"><p className="muted">Loading…</p></main>;
 
   return (
-    <>
-      <Link to="/" className="back">← All documents</Link>
+    <main className="page wide">
+      <Link to="/" className="back">← Back to projects</Link>
       <section className="card">
-        <div className="run-header">
-          <div>
-            <h1>{run.process_name ?? run.video_name}</h1>
-            <p className="muted small">
-              {run.video_name} · uploaded {dateTime(run.created_at)}
-              {run.template_name && <> · template {run.template_name}</>}
+        <div className="run-head">
+          <div className="page-head">
+            <h1>{run.name ?? run.process_name ?? run.video_name}</h1>
+            <p className="subtle small">
+              {run.video_name} · uploaded {dateTime(run.created_at)} · {run.template_name ?? "Default template"}
             </p>
           </div>
-          <StatusBadge status={run.status} />
+          <StatusPill status={run.status} />
         </div>
 
         {active && <Stages run={run} />}
@@ -60,17 +61,13 @@ export default function RunPage() {
         {run.status === "failed" && (
           <div className="notice notice-error">
             <p>{run.error}</p>
-            <button className="button primary" onClick={retry}>Retry</button>
+            <button className="btn btn-dark" onClick={retry}>Retry</button>
           </div>
         )}
 
         {run.status === "done" && (
           <>
-            <div className="actions">
-              <a className="button primary" href={api.documentUrl(run.id)} download>
-                Download Word document
-              </a>
-            </div>
+            <div><a className="btn btn-dark btn-lg" href={api.documentUrl(run.id)} download>Download Word document</a></div>
             {run.summary && (
               <dl className="stats">
                 <div><dt>Steps</dt><dd>{run.summary.steps ?? "–"}</dd></div>
@@ -93,11 +90,11 @@ export default function RunPage() {
       {model && <ModelView model={model} />}
 
       {!active && (
-        <div className="danger-zone">
-          <button className="button ghost danger" onClick={remove}>Delete this document</button>
+        <div className="end">
+          <button className="btn btn-danger-text" onClick={remove}>Delete this project</button>
         </div>
       )}
-    </>
+    </main>
   );
 }
 
@@ -105,7 +102,7 @@ function Stages({ run }: { run: Run }) {
   // "reuse_run" stands for the three recording stages at once (a run made from an earlier one's captions).
   const current = run.stage === "reuse_run" ? run.stages.indexOf("transcribe") : run.stages.indexOf(run.stage ?? "");
   return (
-    <div className="stages">
+    <div className="stages" style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <ol>
         {run.stages.map((key, i) => {
           const state = run.status === "queued" ? "pending" : i < current ? "done" : i === current ? "current" : "pending";
@@ -118,9 +115,9 @@ function Stages({ run }: { run: Run }) {
         })}
       </ol>
       <p className="muted small" aria-live="polite">
-        {run.message ?? (run.status === "queued" ? "Waiting for the previous runs to finish" : "Starting")}
+        {run.message ?? (run.status === "queued" ? "Waiting for the previous projects to finish" : "Starting")}
       </p>
-      <p className="muted small">
+      <p className="subtle small">
         A five-minute recording takes a few minutes. You can leave this page; the document keeps being made.
       </p>
     </div>
@@ -147,7 +144,7 @@ function ModelView({ model }: { model: ProcessModel }) {
               <ul className="plain">
                 {model.inputs.map((input) => (
                   <li key={input.name}>
-                    {input.name} <span className="muted small">({INPUT_KINDS[input.kind]}{input.source ? `, from ${input.source}` : ""})</span>
+                    {input.name} <span className="subtle small">({INPUT_KINDS[input.kind]}{input.source ? `, from ${input.source}` : ""})</span>
                   </li>
                 ))}
               </ul>
@@ -165,7 +162,7 @@ function ModelView({ model }: { model: ProcessModel }) {
                 <div className="step-meta">
                   <span className="step-number">{step.number}</span>
                   {step.application && <span className="chip">{step.application}</span>}
-                  {step.time && <span className="muted small">at {step.time}</span>}
+                  {step.time && <span className="subtle small">at {step.time}</span>}
                 </div>
                 <p>{step.instruction}</p>
                 {step.decision && <p className="decision"><strong>Decision:</strong> {step.decision}</p>}
@@ -175,7 +172,7 @@ function ModelView({ model }: { model: ProcessModel }) {
                   <img src={step.image_url} alt={`Screenshot of step ${step.number}`} loading="lazy" />
                 </a>
               ) : (
-                <div className="step-shot empty muted small">No screenshot</div>
+                <div className="step-shot empty subtle small">No screenshot</div>
               )}
             </li>
           ))}
@@ -185,14 +182,16 @@ function ModelView({ model }: { model: ProcessModel }) {
       {model.requirements.length > 0 && (
         <section className="card">
           <h2>Business rules & requirements</h2>
-          <table>
-            <thead><tr><th>Type</th><th>Description</th></tr></thead>
-            <tbody>
-              {model.requirements.map((r, i) => (
-                <tr key={i}><td>{REQUIREMENT_LABELS[r.category] ?? r.category}</td><td>{r.description}</td></tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table>
+              <thead><tr><th>Type</th><th>Description</th></tr></thead>
+              <tbody>
+                {model.requirements.map((r, i) => (
+                  <tr key={i}><td>{REQUIREMENT_LABELS[r.category] ?? r.category}</td><td>{r.description}</td></tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
 

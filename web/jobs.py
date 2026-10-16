@@ -14,22 +14,25 @@ from typing import Callable
 from sqlalchemy import update
 from sqlmodel import select
 
-from web.db import Run, session, utcnow
+from web.db import ApiKey, Run, session, utcnow
+from web.keys import decrypt
 
 log = logging.getLogger("pdd.jobs")
 
-# run_fn(video_path, run_dir, progress) -> (document path, report); progress(stage, message, done)
-RunFn = Callable[[str, str, Callable[[str, str, bool], None]], tuple[str, dict]]
+# run_fn(video_path, run_dir, progress, api_key) -> (document path, report); progress(stage, message, done);
+# api_key is the user's key for this run, or None for the server's.
+RunFn = Callable[[str, str, Callable[[str, str, bool], None], str | None], tuple[str, dict]]
 
 
-def default_run_fn(video_path: str, run_dir: str, progress) -> tuple[str, dict]:
+def default_run_fn(video_path: str, run_dir: str, progress, api_key: str | None = None) -> tuple[str, dict]:
     from pipeline import run_pdd_pipeline  # imported here so the API starts fast and tests can swap it
-    return run_pdd_pipeline(video_path, run_dir, progress=progress)
+    return run_pdd_pipeline(video_path, run_dir, progress=progress, api_key=api_key)
 
 
 class JobRunner:
-    def __init__(self, engine, runs_dir: Path, run_fn: RunFn = default_run_fn, workers: int = 1):
+    def __init__(self, engine, runs_dir: Path, run_fn: RunFn = default_run_fn, workers: int = 1, secret_key: str = ""):
         self.engine, self.runs_dir, self.run_fn, self.workers = engine, runs_dir, run_fn, workers
+        self.secret_key = secret_key
         self._wake = threading.Condition()
         self._claim = threading.Lock()
         self._stop = False
@@ -82,6 +85,9 @@ class JobRunner:
                 continue
             self.process(run)
 
+    def _api_key(self, run: Run) -> str | None:
+        return _key_for(self.engine, self.secret_key, run)
+
     def _update(self, run_id: str, **fields) -> None:
         with session(self.engine) as db:
             run = db.get(Run, run_id)
@@ -100,7 +106,7 @@ class JobRunner:
 
         log.info("run %s started", run.id)
         try:
-            _, report = self.run_fn(str(run_dir / run.video_file), str(run_dir), progress)
+            _, report = self.run_fn(str(run_dir / run.video_file), str(run_dir), progress, self._api_key(run))
             model = json.loads((run_dir / "process_model.json").read_text(encoding="utf-8"))
             self._update(run.id, status="done", finished_at=utcnow(), message="Document ready",
                          process_name=model.get("process_name"))
@@ -110,12 +116,31 @@ class JobRunner:
             self._update(run.id, status="failed", finished_at=utcnow(), error=_user_message(exc))
 
 
+class MissingKey(Exception):
+    pass
+
+
+def _key_for(engine, secret_key: str, run: Run) -> str | None:
+    if run.api_key_id is None:
+        return None
+    with session(engine) as db:
+        key = db.get(ApiKey, run.api_key_id)
+    if key is None:
+        raise MissingKey("The API key chosen for this project was removed. Create the project again with another key.")
+    try:
+        return decrypt(secret_key, key.secret)
+    except ValueError as exc:
+        raise MissingKey(str(exc))
+
+
 def _user_message(exc: Exception) -> str:
     """A message the person who uploaded the video can act on, without internal details."""
     name = type(exc).__name__
     text = str(exc)
+    if isinstance(exc, MissingKey):
+        return text
     if "AuthenticationError" in name or "api_key" in text.lower():
-        return "The OpenAI API key is missing or invalid. Ask the administrator to check the server's .env."
+        return "OpenAI refused the API key. Check the key in your account (or, for the server key, the server's .env)."
     if "RateLimit" in name or "insufficient_quota" in text:
         return "The OpenAI account hit its rate limit or ran out of credit. Try again later (the run continues from where it stopped)."
     if "Could not open video" in text or "ffprobe failed" in text:
