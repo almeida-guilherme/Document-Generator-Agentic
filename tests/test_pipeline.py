@@ -11,6 +11,7 @@ from docx import Document
 from pipeline import run_pdd_pipeline
 from schemas import (FrameCaption, ProcessOutline, OutlineStep, WindowRefinement, RefinedStep,
                      RequirementItem, ExceptionItem, KeyName, ProcessInput)
+from template import TemplateFill
 from transcribe import transcribe_audio, has_audio
 from tests.synthetic_video import build
 
@@ -77,6 +78,8 @@ class FakeLLM:
                 main = "F998" if n == numbered[-1] else (ids[-1] if ids else "")  # last one invalid
                 refined.append(RefinedStep(number=n, instruction=f"Refined {n}", frame_ids=ids, main_frame_id=main))
             return WindowRefinement(steps=refined)
+        if schema is TemplateFill:  # Pidi's template, the default: nothing known beyond the steps
+            return TemplateFill()
         raise AssertionError(f"unexpected schema {schema}")
 
 
@@ -90,7 +93,8 @@ def video(tmp_path_factory):
 def test_pipeline_end_to_end(video, tmp_path):
     llm = FakeLLM()
     output, report = run_pdd_pipeline(video, str(tmp_path), llm=llm, structure_llm=llm,
-                                      transcribe=lambda v, audio_dir: [], max_frames_per_window=5)
+                                      transcribe=lambda v, audio_dir: [], max_frames_per_window=5,
+                                      standard_layout=True)
 
     assert report["frames_kept"] >= 10
     assert report["steps"] == report["frames_kept"] // 2 + 2  # one per pair of frames + the two frameless steps

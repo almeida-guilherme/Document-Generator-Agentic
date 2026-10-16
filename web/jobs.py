@@ -19,14 +19,16 @@ from web.keys import decrypt
 
 log = logging.getLogger("pdd.jobs")
 
-# run_fn(video_path, run_dir, progress, api_key) -> (document path, report); progress(stage, message, done);
-# api_key is the user's key for this run, or None for the server's.
-RunFn = Callable[[str, str, Callable[[str, str, bool], None], str | None], tuple[str, dict]]
+# run_fn(video_path, run_dir, progress, api_key, recording_name=...) -> (document path, report);
+# progress(stage, message, done); api_key is the user's key for this run, or None for the server's;
+# recording_name is the uploaded file's name (the video is stored as video.<ext>).
+RunFn = Callable[..., tuple[str, dict]]
 
 
-def default_run_fn(video_path: str, run_dir: str, progress, api_key: str | None = None) -> tuple[str, dict]:
+def default_run_fn(video_path: str, run_dir: str, progress, api_key: str | None = None,
+                   recording_name: str | None = None) -> tuple[str, dict]:
     from pipeline import run_pdd_pipeline  # imported here so the API starts fast and tests can swap it
-    return run_pdd_pipeline(video_path, run_dir, progress=progress, api_key=api_key)
+    return run_pdd_pipeline(video_path, run_dir, progress=progress, api_key=api_key, recording_name=recording_name)
 
 
 class JobRunner:
@@ -106,7 +108,8 @@ class JobRunner:
 
         log.info("run %s started", run.id)
         try:
-            _, report = self.run_fn(str(run_dir / run.video_file), str(run_dir), progress, self._api_key(run))
+            _, report = self.run_fn(str(run_dir / run.video_file), str(run_dir), progress, self._api_key(run),
+                                    recording_name=run.video_name)
             model = json.loads((run_dir / "process_model.json").read_text(encoding="utf-8"))
             self._update(run.id, status="done", finished_at=utcnow(), message="Document ready",
                          process_name=model.get("process_name"))

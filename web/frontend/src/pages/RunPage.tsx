@@ -50,7 +50,7 @@ export default function RunPage() {
           <div className="page-head">
             <h1>{run.name ?? run.process_name ?? run.video_name}</h1>
             <p className="subtle small">
-              {run.video_name} · uploaded {dateTime(run.created_at)} · {run.template_name ?? "Default template"}
+              {run.video_name} · uploaded {dateTime(run.created_at)} · {run.template_name ?? "Pidi template"}
             </p>
           </div>
           <StatusPill status={run.status} />

@@ -35,9 +35,12 @@ runs/recording-20261013-184500/
   transcript.json         the narration, with timestamps
   process_model.json      the process model the document is rendered from
   name_checks.json        similar names re-read at full resolution (see below)
+  template.docx, template_analysis.json, template_fill.json   the template and what was written into it
   report.json             counts, coverage checks and cost (see below)
   output/PDD_final.docx
 ```
+
+The document is written into **Pidi's template** (`templates/pidi.docx`, in Brazilian Portuguese): cover, revision history, introduction, impacted teams, overview (summary, systems, requirements, inputs, outputs), flowchart, automation scope and metrics, the steps (each with its application, recorded time and screenshot, grouped in numbered phases), exceptions and business rules. Its analysis (`templates/pidi.analysis.json`, see [Company templates](#company-templates)) was checked by hand and ships with it, so it isn't analyzed on every run; after editing the template, update that file too (the indexes refer to the template's blocks; `describe_template` in `template.py` lists them). `--standard-layout` writes the older built-in layout (`render.py`, in English) instead.
 
 Options: `--caption-width` (width frames are shrunk to before captioning, default 1366; OpenAI scales images to a 768 px short side, so larger gains nothing, and smaller misreads file names and column headers), `--window` (observations per refinement call, default 30), `--sample-every` (seconds between sampled frames, default 0.5), `--change-threshold` (share of changed pixels that counts as a new screen state, default 0.001).
 
@@ -59,7 +62,7 @@ Models are set with environment variables: `PDD_MODEL` for captioning frames (de
 
 ## Company templates
 
-To write the document into the PDD format a company already uses, pass its Word template:
+To write the document into the PDD format a company already uses instead of Pidi's, pass its Word template:
 
 ```bash
 .venv/bin/python main.py path/to/recording.mp4 --template path/to/PDD_Template.docx
@@ -69,7 +72,7 @@ The template is read once per run (and once per upload on the website), by `temp
 
 - **Analysis**: the model sees the template block by block (paragraphs with their styles, tables row by row, images, page headers) and decides for each one: keep (fixed text such as the introduction or a generic list of requirements), remove (instructions to the author like "<Lista de todos os sistemas>", and leftovers of the process the template was last used for: example steps, screenshots, systems, people, sample rows), write (a paragraph written for each process), fill a table's rows, answer a question table (e.g. metrics), or put the flowchart there. It also lists the short placeholders ("<Cliente>", "<Nome do Processo>"), finds how the example step is written ("P1 - ...", grouped under headings) and the template's language. `python template.py PDD_Template.docx` prints what it decided.
 - **Fill**: after the steps are worked out (in the template's language and in the wording of its example step), one call writes every part marked to fill from the process model and the narration: tables (systems, inputs, exceptions, revision history...), metrics answers, scope, captions and placeholder values.
-- **Render** (`render_template.py`): the template's own file is the starting point, so its cover, logo, styles, headers, numbering and fixed text stay exactly as they are. Example blocks are removed, tables keep their header and the formatting of their first row, steps take the format of the example step, and the table of contents is rebuilt (Word fills in the page numbers when the document is opened).
+- **Render** (`render_template.py`): the template's own file is the starting point, so its cover, logo, styles, headers, numbering and fixed text stay exactly as they are. Example blocks are removed, tables keep their header and the formatting of their first row, steps take the format of the example step (and of its details line, e.g. "Aplicação: SAP  Tempo gravado: 00:12", when there is one), the flowchart replaces the example diagram or the box marking its place, and the table of contents is rebuilt (Word fills in the page numbers when the document is opened).
 
 Whatever the recording doesn't say (contacts, versions, login modules, volumes, risk...) is never invented: it is written as the template's own "to fill" marker (e.g. "[A preencher]"), or the placeholder is left, highlighted in yellow so the author sees what to complete. The run report counts them (`missing_marks`).
 
@@ -77,11 +80,11 @@ The run folder keeps its own `template.docx`, `template_analysis.json` and `temp
 
 ## How it works
 
-The pipeline is a LangGraph graph (`pipeline.py`). Every stage reads and writes a shared state whose central piece is the **process model** (`ProcessModel` in `schemas.py`): steps with their screenshots, application, decision and recorded duration; the process inputs (structured, semi-structured or unstructured); key names; business rules and requirements; exceptions. The inputs are the recording and optionally a company template; the output is the .docx. The ROI analysis is planned as a further node that reads the same model.
+The pipeline is a LangGraph graph (`pipeline.py`). Every stage reads and writes a shared state whose central piece is the **process model** (`ProcessModel` in `schemas.py`): steps with their screenshots, application, decision and recorded duration; the process inputs (structured, semi-structured or unstructured); key names; business rules and requirements; exceptions. The inputs are the recording and a template (Pidi's or a company's); the output is the .docx. The ROI analysis is planned as a further node that reads the same model.
 
 ```
-START ─┬─ analyze_template ─┬─┬─ extract_frames ─ caption ─ transcribe ─┬─ structure ─ verify_names ─┬─ fill_template ─┬─ render ─ END
-       └─ (no template) ────┘ └─ reuse_run (--from-run) ─────────────────┘                            └─ (no template) ─┘
+START ─┬─ analyze_template ───────┬─┬─ extract_frames ─ caption ─ transcribe ─┬─ structure ─ verify_names ─┬─ fill_template ───────┬─ render ─ END
+       └─ (template analyzed) ────┘ └─ reuse_run (--from-run) ─────────────────┘                            └─ (--standard-layout) ─┘
 ```
 
 1. **Frames** (`create_video.py`): samples the video and keeps a frame whenever enough pixels differ from the last kept one and the screen has settled, plus the final state of a screen right before it changes (e.g. a filled form before Save). Scrolling or animations get one frame every few seconds. Each frame gets an id (`F001`, `F002`, ...).
@@ -95,7 +98,7 @@ START ─┬─ analyze_template ─┬─┬─ extract_frames ─ caption ─ 
 
    Code numbers the steps, takes each step's start and duration from its frames, maps ids to image files (so the model never writes file paths), and replaces misreadings of key names. Only variants a few characters away from the name are replaced, since the model sometimes lists different things as variants.
 5. **Name check** (`verify_names.py`): captions see frames scaled down, where small text like a title bar is misread differently from frame to frame (e.g. "5.5.26" read as "5.3.26" in half the frames), and the text-only model can't tell which reading is right. For each pair of key names a character or two apart, a few frames whose captions mention either are cut into overlapping full-resolution tiles and the vision model is asked which name actually appears. If only one ever does, the other is replaced by it. If both do (e.g. two dated files listed side by side), they are different things and are kept.
-6. **Document** (`render.py`, or `render_template.py` with a company template, see above): python-docx builds the PDD: introduction with a process overview (applications, inputs, decision points, recorded duration), flowchart (long processes are laid out in columns joined by connector circles; decisions are diamonds), steps with screenshots, exceptions, and business rules & requirements, with a clickable table of contents.
+6. **Fill and document** (`template.py`, `render_template.py`, see [Company templates](#company-templates)): one call writes the template's sections from the process model, the narration and facts the code knows (recording file, recorded duration, decision points); python-docx writes them into the template with the flowchart (long processes are laid out in columns joined by connector circles; decisions are diamonds) and the steps with screenshots. With `--standard-layout`, `render.py` builds the older built-in layout instead.
 
 ## Website
 
@@ -125,6 +128,8 @@ Open http://127.0.0.1:8000 and create an account. For development with live relo
   - Recordings and documents are confidential company material, so restrict sign-up and back up `data/`.
 
 The API is described at http://127.0.0.1:8000/api/docs.
+
+To put it on a server, `compose.yaml` runs the app (`Dockerfile`) behind Caddy, which handles HTTPS; `deploy/LIGHTSAIL.md` is the step-by-step for AWS Lightsail, with `deploy/env.example` as the settings to fill in.
 
 ## Checking a run
 

@@ -18,8 +18,12 @@ parser.add_argument("--from-run", metavar="RUN_DIR",
                     help="reuse frames, captions and transcript from an earlier run of the same video "
                          "(only structuring and the document are redone)")
 parser.add_argument("--template", metavar="DOCX",
-                    help="a company PDD template to write the document into (its examples and instructions are "
-                         "removed, its sections filled); a resumed run uses the template it started with")
+                    help="a company PDD template to write the document into instead of Pidi's (its examples and "
+                         "instructions are removed, its sections filled); a resumed run uses the template it "
+                         "started with")
+parser.add_argument("--standard-layout", action="store_true",
+                    help="without --template, write the document in the older standard layout instead of Pidi's "
+                         "template")
 parser.add_argument("--resume", metavar="RUN_DIR",
                     help="continue an interrupted run in its own folder; stages already done are not redone")
 args = parser.parse_args()
@@ -35,6 +39,7 @@ output, report = run_pdd_pipeline(
     caption_width=args.caption_width,
     from_run=args.from_run,
     template_path=args.template,
+    standard_layout=args.standard_layout,
 )
 print_report(report)
 print(f"Document generated: {output}")

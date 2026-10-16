@@ -4,7 +4,7 @@ What is still missing, by when it matters. Today the app has **one user**, so th
 
 ## Before putting it on a server
 
-- [ ] **HTTPS and hosting.** A server with a domain, a reverse proxy that handles HTTPS and large uploads (e.g. Caddy), `PDD_COOKIE_SECURE=true`. The app runs as a single process (the job queue lives in it), with `data/` on a persistent disk.
+- [ ] **HTTPS and hosting.** A server with a domain, a reverse proxy that handles HTTPS and large uploads (e.g. Caddy), `PDD_COOKIE_SECURE=true`. The app runs as a single process (the job queue lives in it), with `data/` on a persistent disk. Prepared for AWS Lightsail in `deploy/LIGHTSAIL.md` (Docker + Caddy); not deployed yet.
 - [ ] **Backups of `data/`.** It holds the database (accounts, projects, encrypted API keys), every uploaded recording and every generated document. Also keep `data/secret_key` (or set `PDD_SECRET_KEY`): without it, sessions end and saved API keys can't be read.
 - [ ] **Close sign-up.** With one user: `PDD_ALLOW_SIGNUP=false` once the account exists (accounts can still be made with `python -m web.create_user`). Otherwise anyone who finds the address can create an account.
 - [ ] **OpenAI spending.** New accounts run on the server's key (`OPENAI_API_KEY`) unless `PDD_ALLOW_SERVER_KEY=false`. Set a monthly budget limit in the OpenAI dashboard either way.
