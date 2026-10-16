@@ -13,7 +13,8 @@ def columns_for(n_steps: int) -> int:
     return min(MAX_COLUMNS, max(1, math.ceil(n_steps / MAX_PER_COLUMN)))
 
 
-def build_flowchart(model: ProcessModel, output_path: str = "cache/flowchart") -> str:
+def build_flowchart(model: ProcessModel, output_path: str = "cache/flowchart", start_label: str = "Start",
+                    end_label: str = "End") -> str:
     dot = graphviz.Digraph(format="png")
     dot.attr(rankdir="TB", ranksep="0.25", nodesep="0.5", dpi="150", newrank="true")
     dot.attr("node", shape="box", style="rounded,filled", fillcolor="#D9E2F3", fontname="Helvetica", fontsize="10",
@@ -27,7 +28,7 @@ def build_flowchart(model: ProcessModel, output_path: str = "cache/flowchart") -
     connector = {"shape": "circle", "style": "filled", "fillcolor": "#2F5496", "fontcolor": "white", "width": "0.35",
                  "fixedsize": "true"}
 
-    dot.node("start", "Start", **terminal)
+    dot.node("start", start_label, **terminal)
     tops = ["start"]  # first node of each column, kept on one row
     prev = "start"
     for c, column in enumerate(columns):
@@ -48,7 +49,7 @@ def build_flowchart(model: ProcessModel, output_path: str = "cache/flowchart") -
                 dot.node(node, label)
             dot.edge(prev, node)
             prev = node
-    dot.node("end", "End", **terminal)
+    dot.node("end", end_label, **terminal)
     dot.edge(prev, "end")
 
     with dot.subgraph() as same:

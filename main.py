@@ -17,6 +17,9 @@ parser.add_argument("--caption-width", type=int, default=1366,
 parser.add_argument("--from-run", metavar="RUN_DIR",
                     help="reuse frames, captions and transcript from an earlier run of the same video "
                          "(only structuring and the document are redone)")
+parser.add_argument("--template", metavar="DOCX",
+                    help="a company PDD template to write the document into (its examples and instructions are "
+                         "removed, its sections filled); a resumed run uses the template it started with")
 parser.add_argument("--resume", metavar="RUN_DIR",
                     help="continue an interrupted run in its own folder; stages already done are not redone")
 args = parser.parse_args()
@@ -31,6 +34,7 @@ output, report = run_pdd_pipeline(
     frame_options={"sample_every": args.sample_every, "change_threshold": args.change_threshold},
     caption_width=args.caption_width,
     from_run=args.from_run,
+    template_path=args.template,
 )
 print_report(report)
 print(f"Document generated: {output}")
