@@ -1,5 +1,5 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { createContext, useContext, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { api, type User } from "./api";
 import { Logo, initials } from "./components";
 import AccountPage from "./pages/AccountPage";
@@ -64,12 +64,69 @@ function Shell({ children }: { children: ReactNode }) {
               Projects
             </NavLink>
             <NavLink to="/templates">Templates</NavLink>
-            <NavLink to="/account">Account</NavLink>
-            {user && <NavLink to="/account" className="avatar" aria-label="Your account">{initials(user)}</NavLink>}
+            {user && <AccountMenu user={user} />}
           </nav>
         </div>
       </header>
       {children}
     </>
+  );
+}
+
+export function useLogout() {
+  const { setUser } = useAuth();
+  const navigate = useNavigate();
+  return async () => {
+    await api.logout().catch(() => {});
+    setUser(null);
+    navigate("/");
+  };
+}
+
+/**
+ * The avatar; hovering it (or focusing it with the keyboard) opens a menu with the account and Log out.
+ * Touch screens have no hover, so there a tap opens the menu instead of going to the account page.
+ */
+function AccountMenu({ user }: { user: User }) {
+  const logout = useLogout();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const { pathname } = useLocation();
+  useEffect(() => {
+    // Leaving the page closes the menu, also when it is open because a link in it has focus.
+    setOpen(false);
+    if (ref.current?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
+  }, [pathname]);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: PointerEvent) => ref.current?.contains(e.target as Node) || setOpen(false);
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+
+  function tap(e: MouseEvent) {
+    if (window.matchMedia("(hover: none)").matches) {
+      e.preventDefault();
+      setOpen(!open);
+    }
+  }
+
+  return (
+    <div className={open ? "account-menu open" : "account-menu"} ref={ref}>
+      <NavLink to="/account" className="avatar" aria-label="Your account" aria-haspopup="menu" aria-expanded={open}
+               onClick={tap}>
+        {initials(user)}
+      </NavLink>
+      <div className="account-pop">
+        <div className="account-panel" role="menu">
+          <div className="account-who">
+            {user.name && <strong>{user.name}</strong>}
+            <span>{user.email}</span>
+          </div>
+          <NavLink to="/account" role="menuitem">Account</NavLink>
+          <button type="button" role="menuitem" onClick={logout}>Log out</button>
+        </div>
+      </div>
+    </div>
   );
 }

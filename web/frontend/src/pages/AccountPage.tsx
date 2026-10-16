@@ -1,18 +1,10 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
 import { api, type Keys } from "../api";
 import { useAuth } from "../App";
 import { initials } from "../components";
 
 export default function AccountPage() {
-  const { user, setUser } = useAuth();
-  const navigate = useNavigate();
-
-  async function logout() {
-    await api.logout().catch(() => {});
-    setUser(null);
-    navigate("/");
-  }
+  const { user } = useAuth();
 
   if (!user) return null;
   return (
@@ -24,9 +16,6 @@ export default function AccountPage() {
       <InfoSection />
       <PasswordSection />
       <KeysSection />
-      <button type="button" className="link-button" onClick={logout}>
-        Log out
-      </button>
     </main>
   );
 }
