@@ -6,6 +6,7 @@ import numpy as np
 from PIL import Image
 from langchain_core.messages import HumanMessage
 from prompts.caption_prompt import CAPTION_PROMPT
+from schemas import repair_model
 
 # Change detection runs on a downscaled grayscale copy, so thresholds don't depend on resolution.
 COMPARE_WIDTH = 640
@@ -40,7 +41,7 @@ def create_frames(
     change_threshold: float = 0.001,
     detail_threshold: float = 0.0008,
     max_unsettled: float = 4.0,
-    max_frames: int = 400,
+    max_frames: int = 2000,
 ) -> list[dict]:
     """
     Extracts the screenshots worth documenting from a screen recording.
@@ -55,7 +56,9 @@ def create_frames(
                    so one frame is taken anyway instead of waiting for it to settle.
       - "start" / "end": first and last state of the video.
 
-    Defaults: a moving mouse cursor changes ~0.07% of pixels, a filled form field ~0.13%.
+    Defaults: a moving mouse cursor changes ~0.07% of pixels, a filled form field ~0.13%. max_frames only
+    guards against runaway costs (a 5-minute recording keeps ~120 frames, so 2000 covers well over an hour);
+    frames after it are lost, so it must stay far above what real recordings need.
 
     Returns frames in chronological order: [{"id", "path", "timestamp", "reason"}].
     """
@@ -144,5 +147,5 @@ def caption_frame(frame: dict, llm, max_width: int = 1366) -> dict:
     return {
         "id": frame["id"],
         "timestamp": frame["timestamp"],
-        **result.model_dump(),
+        **repair_model(result).model_dump(),
     }

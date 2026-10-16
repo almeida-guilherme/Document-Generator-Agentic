@@ -2,6 +2,7 @@
 import json
 import os
 import re
+import threading
 import subprocess
 from types import SimpleNamespace
 import pytest
@@ -23,6 +24,7 @@ class FakeLLM:
         self.refine_calls = 0
         self.captions = 0
         self.fail_after_captions = fail_after_captions
+        self.lock = threading.Lock()
 
     def with_structured_output(self, schema):
         return SimpleNamespace(invoke=lambda messages: self._answer(schema, messages))
@@ -30,20 +32,22 @@ class FakeLLM:
     def _answer(self, schema, messages):
         text = messages[-1].content
         if schema is FrameCaption:
-            if self.captions == self.fail_after_captions:
-                raise ConnectionError("simulated network failure")
-            self.captions += 1
+            with self.lock:  # captions are requested from several threads
+                if self.captions == self.fail_after_captions:
+                    raise ConnectionError("simulated network failure")
+                self.captions += 1
             return FrameCaption(screen_or_system="Intranet", observed_action="something", visible_text=[])
         if schema is ProcessOutline:
             ids = re.findall(r'"id": "(F\d+)"', text)
             times = dict(re.findall(r'"id": "(F\d+)", "t": ([\d.]+)', text))
-            # One step per pair of frames, plus one bad id the code must ignore and two steps with no frames:
-            # one never narrated (stays without image) and one narrated just before the next step's frames.
-            steps = [OutlineStep(instruction=f"You need to do {a}+{b}", short_label="Do it", frame_ids=[a, b])
-                     for a, b in zip(ids[::2], ids[1::2])]
-            steps[0].frame_ids.append("F999")
-            steps.insert(1, OutlineStep(instruction="You need to wait for approval", short_label="Wait", frame_ids=[]))
-            steps.insert(2, OutlineStep(instruction="You need to clear the form", short_label="Clear", frame_ids=[],
+            # One step per pair of frames (as a range), one range ending at an unknown id that the code must
+            # ignore, and two steps with no frames: one never narrated (stays without image) and one narrated
+            # just before the next step's frames.
+            steps = [OutlineStep(instruction=f"You need to do {a}+{b}", short_label="Do it", first_frame_id=a,
+                                 last_frame_id=b) for a, b in zip(ids[::2], ids[1::2])]
+            steps[1].last_frame_id = "F999"
+            steps.insert(1, OutlineStep(instruction="You need to wait for approval", short_label="Wait"))
+            steps.insert(2, OutlineStep(instruction="You need to clear the form", short_label="Clear",
                                         narrated_at=float(times[ids[2]])))
             steps[0].application = steps[3].application = "Intranet"
             steps[3].decision = "If the client exists, open it; otherwise create it."
@@ -192,12 +196,16 @@ def test_interrupted_run_resumes_where_it_stopped(video, tmp_path):
     failing = FakeLLM(fail_after_captions=4)
     with pytest.raises(ConnectionError):
         run_pdd_pipeline(video, str(tmp_path), llm=failing, structure_llm=failing, transcribe=lambda v, audio_dir: [])
-    assert len(json.loads((tmp_path / "captions.json").read_text())) == 4
+    # Frames are captioned several at a time, but what is saved is always the frames in order up to the
+    # first one that failed (which may be the very first frame, as the failing call can be any of them).
+    captions_file = tmp_path / "captions.json"
+    saved = [c["id"] for c in json.loads(captions_file.read_text())] if captions_file.exists() else []
+    assert len(saved) <= 4 and saved == [f"F{i:03d}" for i in range(1, len(saved) + 1)]
 
     llm = FakeLLM()
     _, report = run_pdd_pipeline(video, str(tmp_path), llm=llm, structure_llm=llm,
                                  transcribe=lambda v, audio_dir: [])
-    assert llm.captions == report["frames_kept"] - 4  # only the frames not captioned before
+    assert llm.captions == report["frames_kept"] - len(saved)  # only the frames not captioned before
     captions = json.loads((tmp_path / "captions.json").read_text())
     assert [c["id"] for c in captions] == [f"F{i:03d}" for i in range(1, report["frames_kept"] + 1)]
 

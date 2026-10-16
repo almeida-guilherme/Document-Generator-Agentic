@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 from typing import cast
 from langchain_core.messages import HumanMessage, SystemMessage
 from schemas import (ProcessModel, Step, ProcessOutline, OutlineStep, WindowRefinement, ExceptionItem, KeyName,
-                     format_timestamp)
+                     format_timestamp, repair_model)
 from prompts.structure_prompt import OUTLINE_SYSTEM_PROMPT, REFINE_SYSTEM_PROMPT
 
 # Narration starting this many seconds before a window is still sent with it, since people often
@@ -54,6 +54,22 @@ def _clean_ids(ids: list[str], allowed: set[str], invalid: list[str]) -> list[st
         elif fid not in result:
             result.append(fid)
     return sorted(result)
+
+
+def _frame_range(step: OutlineStep, captions: list[dict], position: dict[str, int], invalid: list[str]) -> list[str]:
+    """The ids from the step's first to its last frame. An unknown id is recorded and the other end used alone."""
+    ends = []
+    for raw in (step.first_frame_id, step.last_frame_id):
+        if not raw:
+            continue
+        fid = raw.strip().upper()
+        if fid in position:
+            ends.append(position[fid])
+        else:
+            invalid.append(raw)
+    if not ends:
+        return []
+    return [c["id"] for c in captions[min(ends):max(ends) + 1]]
 
 
 def _guess_frames_from_narration(steps: list[OutlineStep], captions: list[dict]) -> list[int]:
@@ -175,7 +191,7 @@ def replace_names(model: ProcessModel, replacements: dict[str, str]) -> dict[str
     # the same name twice; those are collapsed to one.
     targets = list(dict.fromkeys(replacements.values()))
     repeated = re.compile("|".join(
-        rf"(?P<q{i}>['\"]?){re.escape(name)}(?P=q{i})(?: or |, |/| and )(?P=q{i}){re.escape(name)}(?P=q{i})"
+        rf"(?P<q{i}>['\"]?){re.escape(name)}(?P=q{i})(?: or | ou | o |, |/| and | e | y )(?P=q{i}){re.escape(name)}(?P=q{i})"
         for i, name in enumerate(targets)))
 
     def fix(text: str) -> str:
@@ -227,6 +243,8 @@ def structure_pdd(
     frames: list[dict],
     llm,
     max_frames_per_window: int = 30,
+    language: str | None = None,
+    step_example: str | None = None,
 ) -> tuple[ProcessModel, dict]:
     """
     Builds the PDD in two passes so long recordings stay consistent:
@@ -238,7 +256,9 @@ def structure_pdd(
     Code then numbers the steps, takes their time from their first frame and maps ids to image paths,
     measures how long each step took in the recording, and fixes misread names using the outline's glossary.
 
-    `llm` is a LangChain chat model (structured output is applied here).
+    `llm` is a LangChain chat model (structured output is applied here). `language` (e.g. "Brazilian
+    Portuguese", from a company template) is the language the text is written in; by default English.
+    `step_example` is a step from the template, whose wording the instructions follow.
     Returns the process model and a report with the coverage checks.
     """
     transcript = transcript or []
@@ -246,13 +266,21 @@ def structure_pdd(
     position = {c["id"]: i for i, c in enumerate(captions)}
     invalid_refs: list[str] = []
 
-    outline = cast(ProcessOutline, llm.with_structured_output(ProcessOutline).invoke([
-        SystemMessage(content=OUTLINE_SYSTEM_PROMPT),
+    write_in = (f"\n\nWrite all text (process name, summary, steps, labels, decisions, requirements, exceptions) in "
+                f"{language}. Names of applications, screens, files and buttons stay exactly as shown on screen."
+                if language else "")
+    if step_example:
+        write_in += (f"\n\nWrite the step instructions in the same style as this example step from the company's "
+                     f"documents (its wording, not its content): \"{step_example}\". This style replaces the "
+                     "'You need to...' directive style above: one instruction per step, without a step number or "
+                     "label in front (the document numbers the steps).")
+    outline = repair_model(cast(ProcessOutline, llm.with_structured_output(ProcessOutline).invoke([
+        SystemMessage(content=OUTLINE_SYSTEM_PROMPT + write_in),
         HumanMessage(content=f"Screen observations:\n\n{_observations_text(captions, compact=True)}"
                              f"\n\nAudio narration:\n\n{_transcript_text(transcript)}"),
-    ]))
+    ])))
     for step in outline.steps:
-        step.frame_ids = _clean_ids(step.frame_ids, set(position), invalid_refs)
+        step.frame_ids = _frame_range(step, captions, position, invalid_refs)
     framed_by_narration = _guess_frames_from_narration(outline.steps, captions)
 
     refine_llm = llm.with_structured_output(WindowRefinement)
@@ -265,7 +293,11 @@ def structure_pdd(
         if cited and cited[-1] - cited[0] + 1 <= max_frames_per_window:
             window_caps = captions[cited[0]:cited[-1] + 1]  # whole span, so uncited frames can be attached too
         else:
-            window_caps = [captions[p] for p in cited][:max_frames_per_window]
+            # A step spanning more frames than one call gets (a long stretch of a meeting on one screen) is
+            # shown through frames spread evenly over its range, its first and last included.
+            picks = sorted({cited[round(k * (len(cited) - 1) / (max_frames_per_window - 1))]
+                            for k in range(max_frames_per_window)}) if cited else []
+            window_caps = [captions[p] for p in picks]
         window_ids = {c["id"] for c in window_caps}
 
         refined = {}
@@ -275,15 +307,15 @@ def structure_pdd(
             numbered = "\n".join(
                 f"{i + 1}. {outline.steps[i].instruction}  (first guess of frames: {outline.steps[i].frame_ids})"
                 for i in window)
-            result = cast(WindowRefinement, refine_llm.invoke([
-                SystemMessage(content=REFINE_SYSTEM_PROMPT),
+            result = repair_model(cast(WindowRefinement, refine_llm.invoke([
+                SystemMessage(content=REFINE_SYSTEM_PROMPT + write_in),
                 HumanMessage(content=(
                     f"Process: {outline.process_name}\n\n{_key_names_text(outline.key_names)}"
                     f"Steps to refine:\n{numbered}\n\n"
                     f"Screen observations for this part:\n\n{_observations_text(window_caps)}\n\n"
                     f"Audio narration for this part:\n\n{_transcript_text(narration)}"
                 )),
-            ]))
+            ])))
             refined = {r.number: r for r in result.steps if r.number - 1 in window}
 
         for i in window:

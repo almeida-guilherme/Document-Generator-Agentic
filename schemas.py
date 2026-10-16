@@ -1,11 +1,17 @@
-from typing import Literal
+import re
+from typing import Literal, TypeVar
 from pydantic import BaseModel, Field
+from pydantic.json_schema import SkipJsonSchema
 
+
+# Every list the model returns has a maximum length, which the API enforces while generating. Without it,
+# a long recording can send the model into a loop: on a 41-minute meeting it listed misreadings of one
+# window title until it hit the output limit, and the whole call failed.
 
 class FrameCaption(BaseModel):
     screen_or_system: str = Field(description="Which screen, application, or website is visible in the frame")
     observed_action: str = Field(description="What the user appears to be doing, or what is being displayed at this moment")
-    visible_text: list[str] = Field(default_factory=list, description="Relevant text visible on screen (titles, fields, buttons, messages)")
+    visible_text: list[str] = Field(default_factory=list, max_length=40, description="Relevant text visible on screen (titles, fields, buttons, messages)")
 
 
 class ExceptionItem(BaseModel):
@@ -36,7 +42,7 @@ class ProcessInput(BaseModel):
 
 class KeyName(BaseModel):
     name: str = Field(description="The correct spelling of a file, folder, site, application, view, sheet or button name")
-    variants: list[str] = Field(default_factory=list, description="Other spellings of the same thing found in the observations (misreadings), if any")
+    variants: list[str] = Field(default_factory=list, max_length=8, description="Other spellings of the same thing found in the observations (misreadings), if any; at most a few")
 
 
 class OutlineStep(BaseModel):
@@ -44,30 +50,35 @@ class OutlineStep(BaseModel):
     short_label: str = Field(description="A very short label (max 4-5 words) summarizing this step's action, suitable for a flowchart node")
     application: str = Field(default="", description="The application or website where this step happens (e.g. 'Excel', 'SAP Business Client', 'SharePoint'), spelled the same way in every step; empty if unclear")
     decision: str = Field(default="", description="If what is done in this step depends on a condition (e.g. 'If the order has no match in the table, leave it as is'), the condition and what happens in each case; otherwise empty")
-    frame_ids: list[str] = Field(description="IDs of the observations (e.g. 'F012') that evidence this step, in chronological order")
+    # The model gives the range of observations showing the step rather than every id: a long recording has
+    # over a thousand frames, and listing them all made the answer exceed the model's output limit.
+    first_frame_id: str | None = Field(default=None, description="ID of the first observation (e.g. 'F012') that shows this step, or null if no observation shows it")
+    last_frame_id: str | None = Field(default=None, description="ID of the last observation that shows this step (the same as first_frame_id if only one does), or null")
     narrated_at: float | None = Field(default=None, description="Timestamp in seconds of the narration segment that describes this step, or null if it isn't narrated")
+    # Filled by code from the range above (not part of what the model is asked for).
+    frame_ids: SkipJsonSchema[list[str]] = Field(default_factory=list)
 
 
 class ProcessOutline(BaseModel):
     process_name: str = Field(description="Short, descriptive name of the documented process")
     project_proposal: str = Field(description="Summary of the project and its current (as-is) state, for the Introduction section")
-    key_names: list[KeyName] = Field(default_factory=list, description="The names that identify what the process works on (files, folders, sites, applications, views, sheets), each with its correct spelling")
-    inputs: list[ProcessInput] = Field(default_factory=list, description="The data the process receives or reads")
-    steps: list[OutlineStep] = Field(description="Every step of the process, once each, in the order they are performed")
-    requirements: list[RequirementItem] = Field(default_factory=list, description="Business rules and requirements stated or shown, if any")
-    business_exceptions: list[ExceptionItem] = Field(default_factory=list, description="Business-related exceptions identified, if any")
-    system_exceptions: list[ExceptionItem] = Field(default_factory=list, description="System/application-related exceptions identified, if any")
+    key_names: list[KeyName] = Field(default_factory=list, max_length=30, description="The names that identify what the process works on (files, folders, sites, applications, views, sheets), each with its correct spelling")
+    inputs: list[ProcessInput] = Field(default_factory=list, max_length=20, description="The data the process receives or reads")
+    steps: list[OutlineStep] = Field(max_length=150, description="Every step of the process, once each, in the order they are performed")
+    requirements: list[RequirementItem] = Field(default_factory=list, max_length=50, description="Business rules and requirements stated or shown, if any")
+    business_exceptions: list[ExceptionItem] = Field(default_factory=list, max_length=30, description="Business-related exceptions identified, if any")
+    system_exceptions: list[ExceptionItem] = Field(default_factory=list, max_length=30, description="System/application-related exceptions identified, if any")
 
 
 class RefinedStep(BaseModel):
     number: int = Field(description="Number of the outline step being refined, exactly as given")
     instruction: str = Field(description="The step's instruction, made more specific with names, fields, buttons or values visible in its observations; same directive style")
-    frame_ids: list[str] = Field(description="IDs of the observations that evidence this step, in chronological order")
+    frame_ids: list[str] = Field(max_length=40, description="IDs of the observations that evidence this step, in chronological order")
     main_frame_id: str = Field(description="The one id from frame_ids used as the step's screenshot: the frame that best shows the step done (e.g. the completed form, not the empty one)")
 
 
 class WindowRefinement(BaseModel):
-    steps: list[RefinedStep] = Field(default_factory=list, description="One entry per outline step given, in the same order")
+    steps: list[RefinedStep] = Field(default_factory=list, max_length=30, description="One entry per outline step given, in the same order")
 
 
 # --- The process model (numbers, times and image paths are filled in by code, not by the LLM) ---
@@ -116,6 +127,33 @@ class ProcessModel(BaseModel):
         if not timed:
             return None
         return timed[-1].start_seconds + (timed[-1].duration_seconds or 0) - timed[0].start_seconds
+
+
+_BROKEN_ESCAPE = re.compile(r"\x00([0-9a-fA-F]{2})")
+_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f]")
+Model = TypeVar("Model", bound=BaseModel)
+
+
+def repair_text(text: str) -> str:
+    """
+    The model occasionally writes accented letters as a broken escape: "exportação" comes back as
+    "exporta\\u0000e7\\u0000e3o", i.e. a NUL character followed by the letter's hex code. This restores the
+    letters and drops other control characters (which also break Graphviz and Word).
+    """
+    return _CONTROL.sub("", _BROKEN_ESCAPE.sub(lambda m: chr(int(m.group(1), 16)), text))
+
+
+def repair_model(obj: Model) -> Model:
+    """repair_text applied to every string of a pydantic object."""
+    def fix(value):
+        if isinstance(value, str):
+            return repair_text(value)
+        if isinstance(value, list):
+            return [fix(v) for v in value]
+        if isinstance(value, dict):
+            return {k: fix(v) for k, v in value.items()}
+        return value
+    return type(obj).model_validate(fix(obj.model_dump()))
 
 
 def format_timestamp(seconds: float) -> str:
