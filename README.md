@@ -99,7 +99,7 @@ START ─┬─ analyze_template ─┬─┬─ extract_frames ─ caption ─ 
 
 ## Website
 
-A FastAPI backend (`web/`) and a React front end (`web/frontend/`) let people upload a recording in the browser, follow its progress and download the document. Each user has an account and only sees their own documents.
+Pidi, the website: a FastAPI backend (`web/`) and a React front end (`web/frontend/`) let people upload a recording in the browser as a project, follow its progress and download the document. Each user has an account and only sees their own projects, templates and API keys. The pages follow the Pidi design (landing page, log in / create account, projects, new project, account); fonts are bundled, so the site loads nothing from other servers.
 
 Build the front end once (Node 22), then start the server; it serves both the API and the pages:
 
@@ -115,6 +115,8 @@ Open http://127.0.0.1:8000 and create an account. For development with live relo
 - **Accounts**: passwords are hashed with Argon2. The session is an httpOnly, SameSite=Lax cookie signed with `PDD_SECRET_KEY` (generated into `data/secret_key` if unset), valid for `PDD_SESSION_DAYS` (default 7).
   - `PDD_SIGNUP_DOMAINS=company.com` limits sign-up to company addresses.
   - `PDD_ALLOW_SIGNUP=false` closes it; create accounts with `.venv/bin/python -m web.create_user someone@company.com`, which also resets passwords.
+- **API keys**: people connect their own OpenAI key on the Account page and pick one per project, so usage is billed to them. Keys are checked with OpenAI before they are saved, stored encrypted with a key derived from `PDD_SECRET_KEY` (changing that secret means people reconnect their keys), and never sent back to the browser (only their last four characters are shown). People without a key of their own use the server's `OPENAI_API_KEY`; set `PDD_ALLOW_SERVER_KEY=false` to require their own. Only OpenAI keys can run the pipeline today.
+- **Account**: name, email and password can be changed on the Account page; changing the password logs out the account's other sessions.
 - **Uploads** are limited to `PDD_MAX_UPLOAD_MB` (default 2048) and must contain a video stream.
 - **Templates**: on the Templates page people upload their company's PDD template (.docx), see what the analysis decided for every part of it, and pick it when uploading a recording. Each run copies the template and its analysis into its folder, so deleting a template doesn't change documents made with it.
 - **Before putting it on the internet**:

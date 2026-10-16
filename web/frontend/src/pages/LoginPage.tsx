@@ -1,24 +1,32 @@
 import { useState, type FormEvent } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../api";
 import { useAuth } from "../App";
+import { Logo } from "../components";
 
-export default function LoginPage({ mode }: { mode: "login" | "register" }) {
+export default function LoginPage() {
   const { setUser } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const [params, setParams] = useSearchParams();
+  const isLogin = params.get("mode") !== "register";
+  const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const isLogin = mode === "login";
+
+  function switchTo(mode: "login" | "register") {
+    setError(null);
+    setParams(mode === "register" ? { mode } : {}, { replace: true, state: location.state });
+  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setBusy(true);
     try {
-      const user = await (isLogin ? api.login(email, password) : api.register(email, password));
+      const user = await (isLogin ? api.login(email, password) : api.register(name, email, password));
       setUser(user);
       navigate((location.state as { from?: string } | null)?.from ?? "/", { replace: true });
     } catch (err) {
@@ -29,44 +37,48 @@ export default function LoginPage({ mode }: { mode: "login" | "register" }) {
   }
 
   return (
-    <div className="auth-page">
-      <form className="card auth-card" onSubmit={submit}>
-        <div className="brand auth-brand">
-          <img src="/favicon.svg" alt="" width={28} height={28} />
-          Document Generator
+    <div className="auth-shell">
+      <header className="auth-header"><Logo to="/" large /></header>
+      <main className="auth-main">
+        <div className="auth-card">
+          <div role="tablist" aria-label="Account access" className="tabs">
+            <button type="button" role="tab" aria-selected={isLogin} onClick={() => switchTo("login")}>Log in</button>
+            <button type="button" role="tab" aria-selected={!isLogin} onClick={() => switchTo("register")}>
+              Create account
+            </button>
+          </div>
+
+          <form onSubmit={submit}>
+            <div className="intro">
+              <h1>{isLogin ? "Welcome back" : "Create your account"}</h1>
+              <p>{isLogin ? "Log in to see your projects." : "Start turning recordings into PDDs."}</p>
+            </div>
+            {!isLogin && (
+              <div className="field">
+                <label htmlFor="reg-name">Name</label>
+                <input id="reg-name" type="text" placeholder="Your full name" autoComplete="name" value={name}
+                       onChange={(e) => setName(e.target.value)} />
+              </div>
+            )}
+            <div className="field">
+              <label htmlFor="auth-email">Email</label>
+              <input id="auth-email" type="email" placeholder="you@company.com" autoComplete="email" required
+                     value={email} onChange={(e) => setEmail(e.target.value)} />
+            </div>
+            <div className="field">
+              <label htmlFor="auth-password">Password</label>
+              <input id="auth-password" type="password" required minLength={isLogin ? undefined : 8}
+                     placeholder={isLogin ? "Your password" : "Create a password (at least 8 characters)"}
+                     autoComplete={isLogin ? "current-password" : "new-password"}
+                     value={password} onChange={(e) => setPassword(e.target.value)} />
+            </div>
+            {error && <p className="error" role="alert">{error}</p>}
+            <button className="btn btn-dark btn-lg btn-block" disabled={busy}>
+              {busy ? "Please wait…" : isLogin ? "Log in" : "Create account"}
+            </button>
+          </form>
         </div>
-        <h1>{isLogin ? "Log in" : "Create an account"}</h1>
-        <p className="muted">
-          Turn a screen recording of a process into a Process Design Document for your RPA team.
-        </p>
-        <label>
-          Email
-          <input type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-        </label>
-        <label>
-          Password
-          <input
-            type="password"
-            autoComplete={isLogin ? "current-password" : "new-password"}
-            minLength={isLogin ? undefined : 8}
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
-          {!isLogin && <span className="hint">At least 8 characters.</span>}
-        </label>
-        {error && <p className="error" role="alert">{error}</p>}
-        <button className="button primary" disabled={busy}>
-          {busy ? "Please wait…" : isLogin ? "Log in" : "Create account"}
-        </button>
-        <p className="muted switch">
-          {isLogin ? (
-            <>No account yet? <Link to="/register">Create one</Link></>
-          ) : (
-            <>Already have an account? <Link to="/login">Log in</Link></>
-          )}
-        </p>
-      </form>
+      </main>
     </div>
   );
 }

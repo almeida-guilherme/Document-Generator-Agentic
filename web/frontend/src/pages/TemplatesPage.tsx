@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type Template } from "../api";
+import { UploadIcon } from "../components";
 import { bytes, dateTime } from "../format";
 
 export default function TemplatesPage() {
   const navigate = useNavigate();
-  const input = useRef<HTMLInputElement>(null);
   const [templates, setTemplates] = useState<Template[] | null>(null);
   const [file, setFile] = useState<File | null>(null);
   const [busy, setBusy] = useState(false);
@@ -30,39 +30,40 @@ export default function TemplatesPage() {
   }
 
   return (
-    <>
+    <main className="page medium">
+      <div className="page-head">
+        <h1>Templates</h1>
+        <p>Use your company's own PDD format instead of the default one.</p>
+      </div>
       <section className="card">
-        <h1>Company templates</h1>
-        <p className="muted">
-          Upload the Word document your company uses for PDDs. It is read once: its cover, styles and fixed text are
-          kept, instructions and leftovers from other processes (example steps, screenshots, names) are removed, and
-          the rest is filled for each recording.
-        </p>
-        <div
-          className="dropzone"
-          role="button"
-          tabIndex={0}
-          onClick={() => !busy && input.current?.click()}
-          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && input.current?.click()}
-        >
-          <input ref={input} type="file" accept=".docx" hidden
-                 onChange={(e) => { setError(null); setFile(e.target.files?.[0] ?? null); }} />
+        <div className="card-head">
+          <h2>Add a template</h2>
+          <p>
+            Upload the Word document your company uses for PDDs. It is read once: its cover, styles and fixed text are
+            kept, instructions and leftovers from other processes (example steps, screenshots, names) are removed, and
+            the rest is filled for each recording.
+          </p>
+        </div>
+        <label htmlFor="tpl-file" className="dropzone">
+          <span className="dropzone-icon"><UploadIcon /></span>
           {file ? (
             <>
               <strong>{file.name}</strong>
-              <span className="muted small">{bytes(file.size)} · click to choose another file</span>
+              <span className="subtle small">{bytes(file.size)} · <span className="u">choose another</span></span>
             </>
           ) : (
             <>
-              <strong>Click to choose a template</strong>
-              <span className="muted small">Word document (.docx)</span>
+              <strong>Choose a template or <span className="u">browse</span></strong>
+              <span className="subtle small">Word document (.docx)</span>
             </>
           )}
-        </div>
-        {busy && <p className="muted small" aria-live="polite">Reading the template… this takes about half a minute.</p>}
+        </label>
+        <input id="tpl-file" className="sr-only" type="file" accept=".docx" disabled={busy}
+               onChange={(e) => { setError(null); setFile(e.target.files?.[0] ?? null); }} />
+        {busy && <p className="subtle small" aria-live="polite">Reading the template… this takes about half a minute.</p>}
         {error && <p className="error" role="alert">{error}</p>}
         <div className="actions">
-          <button className="button primary" disabled={!file || busy} onClick={upload}>
+          <button className="btn btn-dark" disabled={!file || busy} onClick={upload}>
             {busy ? "Reading the template…" : "Add template"}
           </button>
         </div>
@@ -73,24 +74,23 @@ export default function TemplatesPage() {
         {templates === null ? (
           <p className="muted">Loading…</p>
         ) : templates.length === 0 ? (
-          <p className="muted">No templates yet. Documents use the standard PDD layout until you add one.</p>
+          <p className="subtle">No templates yet. Projects use the default Pidi model until you add one.</p>
         ) : (
-          <ul className="run-list">
+          <ul className="list">
             {templates.map((t) => (
               <li key={t.id}>
-                <Link to={`/templates/${t.id}`} className="run-row">
-                  <span className="run-title">
+                <Link to={`/templates/${t.id}`} className="list-row">
+                  <span className="title">
                     <strong>{t.name}</strong>
-                    <span className="muted small">{t.language} · added {dateTime(t.created_at)}</span>
+                    <span className="subtle small">{t.language} · added {dateTime(t.created_at)}</span>
                   </span>
-                  <span />
-                  <span className="badge badge-done">Ready</span>
+                  <span className="pill pill-done">Ready</span>
                 </Link>
               </li>
             ))}
           </ul>
         )}
       </section>
-    </>
+    </main>
   );
 }

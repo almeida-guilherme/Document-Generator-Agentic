@@ -1,8 +1,12 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { api, type User } from "./api";
+import { Logo, initials } from "./components";
+import AccountPage from "./pages/AccountPage";
+import LandingPage from "./pages/LandingPage";
 import LoginPage from "./pages/LoginPage";
-import RunsPage from "./pages/RunsPage";
+import NewProjectPage from "./pages/NewProjectPage";
+import ProjectsPage from "./pages/ProjectsPage";
 import RunPage from "./pages/RunPage";
 import TemplatePage from "./pages/TemplatePage";
 import TemplatesPage from "./pages/TemplatesPage";
@@ -21,15 +25,19 @@ export default function App() {
 
   if (user === undefined) return <div className="page-loading" aria-busy="true" />;
 
+  const app = (page: ReactNode) => <RequireUser><Shell>{page}</Shell></RequireUser>;
   return (
     <AuthContext.Provider value={{ user, setUser }}>
       <Routes>
-        <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage mode="login" />} />
-        <Route path="/register" element={user ? <Navigate to="/" replace /> : <LoginPage mode="register" />} />
-        <Route path="/" element={<RequireUser><Shell><RunsPage /></Shell></RequireUser>} />
-        <Route path="/runs/:id" element={<RequireUser><Shell><RunPage /></Shell></RequireUser>} />
-        <Route path="/templates" element={<RequireUser><Shell><TemplatesPage /></Shell></RequireUser>} />
-        <Route path="/templates/:id" element={<RequireUser><Shell><TemplatePage /></Shell></RequireUser>} />
+        {/* Logged out, "/" is the landing page; logged in, it is the list of projects. */}
+        <Route path="/" element={user ? app(<ProjectsPage />) : <LandingPage />} />
+        <Route path="/login" element={user ? <Navigate to="/" replace /> : <LoginPage />} />
+        <Route path="/register" element={<Navigate to="/login?mode=register" replace />} />
+        <Route path="/projects/new" element={app(<NewProjectPage />)} />
+        <Route path="/runs/:id" element={app(<RunPage />)} />
+        <Route path="/templates" element={app(<TemplatesPage />)} />
+        <Route path="/templates/:id" element={app(<TemplatePage />)} />
+        <Route path="/account" element={app(<AccountPage />)} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </AuthContext.Provider>
@@ -43,32 +51,25 @@ function RequireUser({ children }: { children: ReactNode }) {
 }
 
 function Shell({ children }: { children: ReactNode }) {
-  const { user, setUser } = useAuth();
-  const navigate = useNavigate();
-
-  async function logout() {
-    await api.logout().catch(() => {});
-    setUser(null);
-    navigate("/login");
-  }
-
+  const { user } = useAuth();
+  const { pathname } = useLocation();
+  const inProjects = pathname === "/" || pathname.startsWith("/projects") || pathname.startsWith("/runs");
   return (
     <>
-      <header className="topbar">
-        <Link to="/" className="brand">
-          <img src="/favicon.svg" alt="" width={24} height={24} />
-          <span className="brand-name">Document Generator</span>
-        </Link>
-        <nav className="topnav">
-          <NavLink to="/" end>Documents</NavLink>
-          <NavLink to="/templates">Templates</NavLink>
-        </nav>
-        <div className="topbar-user">
-          <span className="muted email">{user?.email}</span>
-          <button className="button ghost small" onClick={logout}>Log out</button>
+      <header className="app-header">
+        <div className="app-header-inner">
+          <Logo to="/" label="Pidi projects" />
+          <nav aria-label="App" className="app-nav">
+            <NavLink to="/" className={inProjects ? "active" : undefined} aria-current={inProjects ? "page" : undefined}>
+              Projects
+            </NavLink>
+            <NavLink to="/templates">Templates</NavLink>
+            <NavLink to="/account">Account</NavLink>
+            {user && <NavLink to="/account" className="avatar" aria-label="Your account">{initials(user)}</NavLink>}
+          </nav>
         </div>
       </header>
-      <main className="container">{children}</main>
+      {children}
     </>
   );
 }

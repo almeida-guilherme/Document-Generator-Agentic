@@ -12,6 +12,7 @@ from sqlmodel import select
 
 from web.auth import current_user
 from web.db import Run, User, session
+from web.keys import pick_key
 from web.templates import copy_into_run, own_template
 
 router = APIRouter(prefix="/api/runs", tags=["runs"])
@@ -39,6 +40,7 @@ class RunOut(BaseModel):
     message: str | None
     error: str | None
     process_name: str | None
+    name: str | None = None
     template_name: str | None = None
     # The stages this run goes through (pipeline.STAGES or TEMPLATE_STAGES), for the progress display.
     stages: list[str] = []
@@ -122,17 +124,19 @@ def list_runs(request: Request, user: User = Depends(current_user)):
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=RunOut)
 def create_run(request: Request, file: UploadFile = File(...), template_id: str | None = Form(None),
+               name: str | None = Form(None), api_key_id: str | None = Form(None),
                user: User = Depends(current_user)):
     settings = request.app.state.settings
     template = own_template(request, template_id, user) if template_id else None
-    name = os.path.basename(file.filename or "recording")
-    ext = os.path.splitext(name)[1].lower()
+    key = pick_key(request, user, api_key_id)
+    video_name = os.path.basename(file.filename or "recording")
+    ext = os.path.splitext(video_name)[1].lower()
     if ext not in VIDEO_EXTENSIONS:
         raise HTTPException(status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
                             f"Upload a screen recording ({', '.join(sorted(VIDEO_EXTENSIONS))}).")
 
-    run = Run(user_id=user.id, video_name=name, video_file=f"video{ext}",
-              template_name=template.name if template else None)
+    run = Run(user_id=user.id, video_name=video_name, video_file=f"video{ext}", name=(name or "").strip()[:120] or None,
+              template_name=template.name if template else None, api_key_id=key.id if key else None)
     run_dir = settings.runs_dir / run.id
     run_dir.mkdir(parents=True)
     limit, size = settings.max_upload_mb * CHUNK, 0
@@ -193,7 +197,7 @@ def get_frame(run_id: str, frame_id: str, request: Request, user: User = Depends
 
 
 def _document_name(run: Run) -> str:
-    base = run.process_name or os.path.splitext(run.video_name)[0]
+    base = run.name or run.process_name or os.path.splitext(run.video_name)[0]
     base = re.sub(r"[^\w\s.-]", "", base).strip()[:80] or "Process"
     return f"{base} - PDD.docx"
 

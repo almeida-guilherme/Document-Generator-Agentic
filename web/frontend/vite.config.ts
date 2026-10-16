@@ -6,4 +6,7 @@ import react from "@vitejs/plugin-react";
 export default defineConfig({
   plugins: [react()],
   server: { proxy: { "/api": "http://127.0.0.1:8000" } },
+  // Small assets (some font subsets) would otherwise be inlined as data: URIs, which the site's
+  // Content-Security-Policy (web/app.py) blocks for fonts.
+  build: { assetsInlineLimit: 0 },
 });
